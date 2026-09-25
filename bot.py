@@ -11,18 +11,25 @@ from telegram.ext import (
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# Target group jiska member count aur joins/leaves track karne hain
+# =========================================================
+# TARGET GROUP
+# Is group ka member count aur joins/leaves track honge
+# =========================================================
+
 TARGET_CHAT_ID = -100431801671
 
-# India time
+# India Standard Time
 IST = timezone(timedelta(hours=5, minutes=30))
 
 # Daily statistics
 daily_stats = {}
 
 
+# =========================================================
+# ADMIN CHECK
+# =========================================================
+
 async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Check whether the person sending the command is an admin."""
 
     if not update.effective_chat or not update.effective_user:
         return False
@@ -35,26 +42,40 @@ async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         return member.status in ("administrator", "creator")
 
-    except Exception:
+    except Exception as e:
+        print("ADMIN CHECK ERROR:", repr(e))
         return False
 
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("✅ Bot is working!")
+# =========================================================
+# START COMMAND
+# =========================================================
 
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    if not update.message:
+        return
+
+    await update.message.reply_text(
+        "✅ Bot is working!"
+    )
+
+
+# =========================================================
+# TRACK TARGET GROUP MEMBERS
+# =========================================================
 
 async def track_member(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE
 ):
-    """Track joins/leaves ONLY from the target group."""
 
     chat_member = update.chat_member
 
     if not chat_member:
         return
 
-    # Ignore every group except target group
+    # Sirf TARGET group ko track karo
     if chat_member.chat.id != TARGET_CHAT_ID:
         return
 
@@ -67,11 +88,13 @@ async def track_member(
         "creator"
     }
 
+    # New member joined
     joined = (
         old_status not in active_statuses
         and new_status in active_statuses
     )
 
+    # Member left/kicked
     left = (
         old_status in active_statuses
         and new_status in {"left", "kicked"}
@@ -90,40 +113,88 @@ async def track_member(
 
     if joined:
         daily_stats[today]["joins"] += 1
+        print("TARGET GROUP JOIN")
 
     if left:
         daily_stats[today]["leaves"] += 1
+        print("TARGET GROUP LEAVE")
 
 
-async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# =========================================================
+# STATS COMMAND
+# =========================================================
+
+async def stats(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
+
+    if not update.message:
+        return
 
     # Sirf admin ko reply
-    if not await is_admin(update, context):
+    admin = await is_admin(update, context)
+
+    if not admin:
+        # Non-admin ko koi reply nahi
         return
 
     today = datetime.now(IST).strftime("%Y-%m-%d")
 
-    joins = daily_stats.get(today, {}).get("joins", 0)
-    leaves = daily_stats.get(today, {}).get("leaves", 0)
+    joins = daily_stats.get(today, {}).get(
+        "joins", 0
+    )
+
+    leaves = daily_stats.get(today, {}).get(
+        "leaves", 0
+    )
+
+    # =====================================================
+    # TARGET GROUP MEMBER COUNT
+    # =====================================================
 
     try:
-        # IMPORTANT:
-        # Member count target group ka liya ja raha hai
+
+        # Pehle target group ko access karke check karo
+        target_chat = await context.bot.get_chat(
+            TARGET_CHAT_ID
+        )
+
+        print(
+            "TARGET GROUP FOUND:",
+            target_chat.title,
+            target_chat.id
+        )
+
+        # Target group ka member count
         member_count = await context.bot.get_chat_member_count(
             TARGET_CHAT_ID
         )
 
+        print(
+            "TARGET MEMBER COUNT:",
+            member_count
+        )
+
     except Exception as e:
-        print("TARGET GROUP ERROR:", e)
+
+        print(
+            "TARGET GROUP ERROR:",
+            repr(e)
+        )
 
         await update.message.reply_text(
-            "❌ Target group ka member count nahi mil raha.\n\n"
-            "Check karo ki:\n"
-            "1️⃣ Bot target group me ADMIN hai\n"
-            "2️⃣ Target group ID sahi hai\n\n"
+            "❌ Target group access error!\n\n"
+            f"Error: {type(e).__name__}\n"
+            f"Details: {e}\n\n"
             f"Target ID: {TARGET_CHAT_ID}"
         )
+
         return
+
+    # =====================================================
+    # FINAL STATS
+    # =====================================================
 
     await update.message.reply_text(
         "📊 Group Stats\n\n"
@@ -133,6 +204,10 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+# =========================================================
+# MAIN
+# =========================================================
+
 def main():
 
     app = (
@@ -141,15 +216,23 @@ def main():
         .build()
     )
 
+    # /start
     app.add_handler(
-        CommandHandler("start", start)
+        CommandHandler(
+            "start",
+            start
+        )
     )
 
+    # /stats
     app.add_handler(
-        CommandHandler("stats", stats)
+        CommandHandler(
+            "stats",
+            stats
+        )
     )
 
-    # Target group ke join/leave events
+    # Target group join/leave tracking
     app.add_handler(
         ChatMemberHandler(
             track_member,
@@ -161,6 +244,10 @@ def main():
 
     app.run_polling()
 
+
+# =========================================================
+# RUN
+# =========================================================
 
 if __name__ == "__main__":
     main()
