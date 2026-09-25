@@ -16,9 +16,8 @@ from telegram.ext import (
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# फिलहाल पुरानी ID रखी है।
-# /id से सही ID मिलने के बाद इसे बदलेंगे।
-TARGET_CHAT_ID = -100431801671
+# TARGET GROUP CHAT ID
+TARGET_CHAT_ID = -1004318016710
 
 
 # =========================================================
@@ -45,6 +44,7 @@ def today():
 # =========================================================
 
 async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
     if not update.effective_chat or not update.effective_user:
         return False
 
@@ -66,9 +66,6 @@ async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    if not update.message:
-        return
-
     await update.message.reply_text(
         "✅ Bot is working!\n\n"
         "Commands:\n"
@@ -83,12 +80,12 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def chat_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    if not update.effective_chat or not update.message:
+    if not update.effective_chat:
         return
 
     chat = update.effective_chat
 
-    chat_name = chat.title or "Private Chat"
+    chat_name = chat.title or chat.first_name or "Private Chat"
 
     await update.message.reply_text(
         "🆔 CHAT INFORMATION\n\n"
@@ -102,7 +99,10 @@ async def chat_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # MEMBER JOIN / LEAVE TRACKING
 # =========================================================
 
-async def member_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def member_update(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
 
     global total_joins
     global total_leaves
@@ -112,7 +112,7 @@ async def member_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not chat_member:
         return
 
-    # Sirf target group track karo
+    # Only target group
     if chat_member.chat.id != TARGET_CHAT_ID:
         return
 
@@ -120,43 +120,56 @@ async def member_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
     new_status = chat_member.new_chat_member.status
 
     # JOIN
-    if new_status in ["member", "administrator"] and old_status in [
-        "left",
-        "kicked"
-    ]:
+    if (
+        new_status in ["member", "administrator"]
+        and old_status in ["left", "kicked"]
+    ):
         total_joins += 1
         daily_joins[today()] += 1
 
+        print(
+            f"JOIN: {chat_member.new_chat_member.user.id}"
+        )
+
     # LEAVE
-    elif new_status in ["left", "kicked"] and old_status in [
-        "member",
-        "administrator"
-    ]:
+    elif (
+        new_status in ["left", "kicked"]
+        and old_status in ["member", "administrator"]
+    ):
         total_leaves += 1
         daily_leaves[today()] += 1
 
+        print(
+            f"LEAVE: {chat_member.old_chat_member.user.id}"
+        )
+
 
 # =========================================================
-# STATS
+# STATS COMMAND
 # =========================================================
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    if not update.message or not update.effective_chat:
-        return
-
-    # ONLY ADMIN CAN USE /stats
+    # Only admin can use /stats
     if not await is_admin(update, context):
+
+        await update.message.reply_text(
+            "❌ Sirf group admin /stats command use kar sakta hai."
+        )
+
         return
 
     command_chat_id = update.effective_chat.id
 
-    # -----------------------------------------------------
+    # =====================================================
     # CHECK TARGET GROUP
-    # -----------------------------------------------------
+    # =====================================================
 
     try:
-        target_chat = await context.bot.get_chat(TARGET_CHAT_ID)
+
+        target_chat = await context.bot.get_chat(
+            TARGET_CHAT_ID
+        )
 
     except Exception as e:
 
@@ -165,14 +178,14 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Error: {type(e).__name__}\n"
             f"Details: {e}\n\n"
             f"Target ID: {TARGET_CHAT_ID}\n\n"
-            "⚠️ Bot ko TARGET group me add karke ADMIN banao."
+            "⚠️ Bot ko target group me add karke ADMIN banao."
         )
 
         return
 
-    # -----------------------------------------------------
+    # =====================================================
     # CHECK BOT ADMIN
-    # -----------------------------------------------------
+    # =====================================================
 
     try:
 
@@ -181,7 +194,10 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
             context.bot.id
         )
 
-        if bot_member.status not in ["administrator", "creator"]:
+        if bot_member.status not in [
+            "administrator",
+            "creator"
+        ]:
 
             await update.message.reply_text(
                 "❌ Bot target group me ADMIN nahi hai.\n\n"
@@ -202,18 +218,18 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         return
 
-    # -----------------------------------------------------
+    # =====================================================
     # TODAY DATA
-    # -----------------------------------------------------
+    # =====================================================
 
     d = today()
 
     joins_today = daily_joins[d]
     leaves_today = daily_leaves[d]
 
-    # -----------------------------------------------------
+    # =====================================================
     # RESULT
-    # -----------------------------------------------------
+    # =====================================================
 
     text = (
         "📊 TARGET GROUP STATS\n\n"
@@ -237,7 +253,10 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ERROR HANDLER
 # =========================================================
 
-async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+async def error_handler(
+    update: object,
+    context: ContextTypes.DEFAULT_TYPE
+):
 
     print("ERROR:", context.error)
 
@@ -249,18 +268,33 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
 def main():
 
     if not BOT_TOKEN:
-        raise RuntimeError("BOT_TOKEN variable missing!")
+        raise RuntimeError(
+            "BOT_TOKEN variable missing!"
+        )
 
     print("🤖 Bot started...")
 
-    app = Application.builder().token(BOT_TOKEN).build()
+    app = (
+        Application
+        .builder()
+        .token(BOT_TOKEN)
+        .build()
+    )
 
     # Commands
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("id", chat_id))
-    app.add_handler(CommandHandler("stats", stats))
+    app.add_handler(
+        CommandHandler("start", start)
+    )
 
-    # Target group member tracking
+    app.add_handler(
+        CommandHandler("id", chat_id)
+    )
+
+    app.add_handler(
+        CommandHandler("stats", stats)
+    )
+
+    # Member tracking
     app.add_handler(
         ChatMemberHandler(
             member_update,
@@ -276,6 +310,10 @@ def main():
         allowed_updates=Update.ALL_TYPES
     )
 
+
+# =========================================================
+# RUN
+# =========================================================
 
 if __name__ == "__main__":
     main()
