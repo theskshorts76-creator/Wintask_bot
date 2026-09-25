@@ -15,7 +15,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 # TARGET GROUP
 # Isi group ke members ke JOIN / LEAVE track honge
 # =========================================================
-TARGET_CHAT_ID = 100431801671
+TARGET_CHAT_ID = -100431801671
 
 # IST timezone
 IST = timezone(timedelta(hours=5, minutes=30))
