@@ -6,13 +6,16 @@ from telegram.ext import (
     Application,
     CommandHandler,
     ContextTypes,
-    ChatMemberHandler,
+    MessageHandler,
+    filters,
 )
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
+# India Standard Time
 IST = timezone(timedelta(hours=5, minutes=30))
 
+# Daily stats memory
 daily_stats = {}
 
 
@@ -20,45 +23,47 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("✅ Bot is working!")
 
 
-async def track_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_member = update.chat_member
-
-    old_status = chat_member.old_chat_member.status
-    new_status = chat_member.new_chat_member.status
-
-    active_statuses = {"member", "administrator", "creator"}
-
-    joined = (
-        old_status not in active_statuses
-        and new_status in active_statuses
-    )
-
-    left = (
-        old_status in active_statuses
-        and new_status in {"left", "kicked"}
-    )
-
-    if not joined and not left:
+async def member_joined(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.message.new_chat_members:
         return
 
-    chat_id = chat_member.chat.id
+    chat_id = update.effective_chat.id
     today = datetime.now(IST).strftime("%Y-%m-%d")
-
     key = (chat_id, today)
 
     if key not in daily_stats:
         daily_stats[key] = {"joins": 0, "leaves": 0}
 
-    if joined:
-        daily_stats[key]["joins"] += 1
+    bot_id = context.bot.id
 
-    if left:
+    for member in update.message.new_chat_members:
+        # Bot khud join ho to count nahi karna
+        if member.id != bot_id:
+            daily_stats[key]["joins"] += 1
+
+
+async def member_left(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message or not update.message.left_chat_member:
+        return
+
+    chat_id = update.effective_chat.id
+    today = datetime.now(IST).strftime("%Y-%m-%d")
+    key = (chat_id, today)
+
+    if key not in daily_stats:
+        daily_stats[key] = {"joins": 0, "leaves": 0}
+
+    member = update.message.left_chat_member
+
+    # Bot khud leave ho to count nahi karna
+    if member.id != context.bot.id:
         daily_stats[key]["leaves"] += 1
 
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
 
+    # Current total members
     member_count = await context.bot.get_chat_member_count(chat_id)
 
     today = datetime.now(IST).strftime("%Y-%m-%d")
@@ -79,7 +84,16 @@ app = Application.builder().token(BOT_TOKEN).build()
 
 app.add_handler(CommandHandler("start", start))
 app.add_handler(CommandHandler("stats", stats))
-app.add_handler(ChatMemberHandler(track_member, ChatMemberHandler.CHAT_MEMBER))
+
+# Join/Leave messages track karna
+app.add_handler(
+    MessageHandler(filters.StatusUpdate.NEW_CHAT_MEMBERS, member_joined)
+)
+
+app.add_handler(
+    MessageHandler(filters.StatusUpdate.LEFT_CHAT_MEMBER, member_left)
+)
 
 print("🤖 Bot started...")
+
 app.run_polling()
