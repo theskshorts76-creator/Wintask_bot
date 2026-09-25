@@ -10,18 +10,14 @@ from telegram.ext import (
     ContextTypes,
 )
 
-
-# =========================================================
-# SETTINGS
-# =========================================================
-
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# जिस GROUP के users track करने हैं
-TARGET_CHAT_ID = -1004318016710
+# Target group jiske users track karne hain
+TARGET_CHAT_ID = -100431801671
 
-# जिस GROUP में commands/reports दिखानी हैं
-COMMAND_CHAT_ID = -1003353359019
+# Agar Railway me COMMAND_CHAT_ID set nahi hai,
+# to admin kisi bhi chat me commands use kar sakta hai.
+COMMAND_CHAT_ID = int(os.getenv("COMMAND_CHAT_ID", "0"))
 
 DATA_FILE = "bot_data.json"
 
@@ -31,7 +27,6 @@ DATA_FILE = "bot_data.json"
 # =========================================================
 
 def load_data():
-
     if not os.path.exists(DATA_FILE):
         return {
             "joins": {},
@@ -64,7 +59,6 @@ data = load_data()
 
 
 def save_data():
-
     with open(DATA_FILE, "w", encoding="utf-8") as f:
         json.dump(
             data,
@@ -116,10 +110,15 @@ async def is_admin(update, context):
 
 def is_command_group(update):
 
-    return (
-        update.effective_chat
-        and update.effective_chat.id == COMMAND_CHAT_ID
-    )
+    if not update.effective_chat:
+        return False
+
+    # Agar COMMAND_CHAT_ID set nahi hai,
+    # admin kisi bhi chat me command use kar sakta hai.
+    if COMMAND_CHAT_ID == 0:
+        return True
+
+    return update.effective_chat.id == COMMAND_CHAT_ID
 
 
 # =========================================================
@@ -132,7 +131,9 @@ async def start(
 ):
 
     await update.message.reply_text(
+
         "✅ Wintask Bot is working!\n\n"
+
         "Commands:\n"
         "/id - Current chat ID\n"
         "/stats - Complete statistics\n"
@@ -165,7 +166,9 @@ async def chat_id(
     )
 
     await update.message.reply_text(
+
         "🆔 CHAT INFORMATION\n\n"
+
         f"📌 Name: {name}\n"
         f"💬 Type: {chat.type}\n"
         f"🆔 Chat ID: {chat.id}"
@@ -201,9 +204,15 @@ async def member_update(
     # =====================================================
 
     if (
-        new_status in ["member", "administrator"]
+        new_status in [
+            "member",
+            "administrator"
+        ]
         and
-        old_status in ["left", "kicked"]
+        old_status in [
+            "left",
+            "kicked"
+        ]
     ):
 
         join_date = today()
@@ -245,7 +254,7 @@ async def member_update(
 
                 admin_info["daily"][join_date] += 1
 
-                # User किस link से आया
+                # User kis link se aaya
                 data["user_links"][user_id] = invite_url
 
                 # User information
@@ -270,9 +279,15 @@ async def member_update(
     # =====================================================
 
     elif (
-        new_status in ["left", "kicked"]
+        new_status in [
+            "left",
+            "kicked"
+        ]
         and
-        old_status in ["member", "administrator"]
+        old_status in [
+            "member",
+            "administrator"
+        ]
     ):
 
         leave_date = today()
@@ -285,7 +300,7 @@ async def member_update(
 
         data["leaves"][leave_date] += 1
 
-        # User किस link से आया था
+        # User kis link se aaya tha
         invite_url = data["user_links"].get(
             user_id
         )
@@ -329,8 +344,9 @@ async def stats(
     if not is_command_group(update):
 
         await update.message.reply_text(
-            "❌ /stats सिर्फ report वाले group में use करें."
+            "❌ इस chat में commands allowed नहीं हैं."
         )
+
         return
 
     if not await is_admin(update, context):
@@ -338,6 +354,7 @@ async def stats(
         await update.message.reply_text(
             "❌ यह command सिर्फ admin use कर सकता है."
         )
+
         return
 
     # Target group
@@ -350,10 +367,14 @@ async def stats(
     except Exception as e:
 
         await update.message.reply_text(
+
             "❌ Target group access error!\n\n"
+
             f"{e}\n\n"
+
             f"Target ID: {TARGET_CHAT_ID}"
         )
+
         return
 
     # Bot admin check
@@ -370,9 +391,12 @@ async def stats(
         ]:
 
             await update.message.reply_text(
+
                 "❌ Bot target group में ADMIN नहीं है.\n\n"
+
                 "Bot को target group में ADMIN बनाएं."
             )
+
             return
 
     except Exception as e:
@@ -380,6 +404,7 @@ async def stats(
         await update.message.reply_text(
             f"❌ Target group error:\n{e}"
         )
+
         return
 
     # =====================================================
@@ -389,7 +414,8 @@ async def stats(
     today_date = datetime.now().date()
 
     yesterday_date = (
-        today_date - timedelta(days=1)
+        today_date -
+        timedelta(days=1)
     )
 
     week_start = (
@@ -397,7 +423,9 @@ async def stats(
         timedelta(days=today_date.weekday())
     )
 
-    month_start = today_date.replace(day=1)
+    month_start = today_date.replace(
+        day=1
+    )
 
     today_joins = 0
     yesterday_joins = 0
@@ -418,11 +446,14 @@ async def stats(
     for date_key, count in data["joins"].items():
 
         try:
+
             d = datetime.strptime(
                 date_key,
                 "%Y-%m-%d"
             ).date()
+
         except Exception:
+
             continue
 
         total_joins += count
@@ -446,11 +477,14 @@ async def stats(
     for date_key, count in data["leaves"].items():
 
         try:
+
             d = datetime.strptime(
                 date_key,
                 "%Y-%m-%d"
             ).date()
+
         except Exception:
+
             continue
 
         total_leaves += count
@@ -472,6 +506,7 @@ async def stats(
     # =====================================================
 
     text = (
+
         "📊 GROUP USER STATISTICS\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
 
@@ -509,7 +544,9 @@ async def stats(
         f"{TARGET_CHAT_ID}"
     )
 
-    await update.message.reply_text(text)
+    await update.message.reply_text(
+        text
+    )
 
 
 # =========================================================
@@ -524,8 +561,9 @@ async def today_stats(
     if not is_command_group(update):
 
         await update.message.reply_text(
-            "❌ /today सिर्फ report वाले group में use करें."
+            "❌ इस chat में commands allowed नहीं हैं."
         )
+
         return
 
     if not await is_admin(update, context):
@@ -533,11 +571,14 @@ async def today_stats(
         await update.message.reply_text(
             "❌ यह command सिर्फ admin use कर सकता है."
         )
+
         return
 
     today_date = datetime.now().date()
 
-    key = date_string(today_date)
+    key = date_string(
+        today_date
+    )
 
     new_users = data["joins"].get(
         key,
@@ -550,6 +591,7 @@ async def today_stats(
     )
 
     await update.message.reply_text(
+
         "🟢 TODAY USER STATISTICS\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
 
@@ -576,8 +618,9 @@ async def yesterday_stats(
     if not is_command_group(update):
 
         await update.message.reply_text(
-            "❌ /yesterday सिर्फ report वाले group में use करें."
+            "❌ इस chat में commands allowed नहीं हैं."
         )
+
         return
 
     if not await is_admin(update, context):
@@ -585,6 +628,7 @@ async def yesterday_stats(
         await update.message.reply_text(
             "❌ यह command सिर्फ admin use कर सकता है."
         )
+
         return
 
     yesterday_date = (
@@ -607,6 +651,7 @@ async def yesterday_stats(
     )
 
     await update.message.reply_text(
+
         "🟡 YESTERDAY USER STATISTICS\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
 
@@ -633,8 +678,9 @@ async def addlink(
     if not is_command_group(update):
 
         await update.message.reply_text(
-            "❌ /addlink सिर्फ report वाले group में use करें."
+            "❌ इस chat में commands allowed नहीं हैं."
         )
+
         return
 
     if not await is_admin(update, context):
@@ -642,6 +688,7 @@ async def addlink(
         await update.message.reply_text(
             "❌ सिर्फ admin नया invite link बना सकता है."
         )
+
         return
 
     # =====================================================
@@ -651,6 +698,7 @@ async def addlink(
     if not context.args:
 
         await update.message.reply_text(
+
             "❌ Link का नाम देना जरूरी है.\n\n"
 
             "Example:\n"
@@ -659,6 +707,7 @@ async def addlink(
             "या:\n"
             "/addlink Delhi Team"
         )
+
         return
 
     link_name = " ".join(
@@ -670,6 +719,7 @@ async def addlink(
         await update.message.reply_text(
             "❌ Link name खाली नहीं हो सकता."
         )
+
         return
 
     user = update.effective_user
@@ -681,7 +731,9 @@ async def addlink(
         # =================================================
 
         invite = await context.bot.create_chat_invite_link(
+
             chat_id=TARGET_CHAT_ID,
+
             name=link_name
         )
 
@@ -719,6 +771,7 @@ async def addlink(
         save_data()
 
         await update.message.reply_text(
+
             "🔗 NEW ADMIN INVITE LINK\n"
             "━━━━━━━━━━━━━━━━━━━━\n\n"
 
@@ -743,6 +796,7 @@ async def addlink(
     except Exception as e:
 
         await update.message.reply_text(
+
             "❌ Invite link नहीं बन पाया.\n\n"
 
             f"Error:\n{e}\n\n"
@@ -762,6 +816,7 @@ async def mylink(
 ):
 
     await update.message.reply_text(
+
         "ℹ️ नया named link बनाने के लिए:\n\n"
 
         "/addlink LINK_NAME\n\n"
@@ -783,8 +838,9 @@ async def links(
     if not is_command_group(update):
 
         await update.message.reply_text(
-            "❌ /links सिर्फ report वाले group में use करें."
+            "❌ इस chat में commands allowed नहीं हैं."
         )
+
         return
 
     if not await is_admin(update, context):
@@ -792,23 +848,30 @@ async def links(
         await update.message.reply_text(
             "❌ सिर्फ admin यह report देख सकता है."
         )
+
         return
 
     if not data["admin_links"]:
 
         await update.message.reply_text(
+
             "📊 ADMIN / LINK-WISE STATISTICS\n\n"
+
             "अभी कोई admin invite link नहीं बना है."
         )
+
         return
 
     text = (
+
         "📊 ADMIN / LINK-WISE STATISTICS\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
     )
 
     for index, (link, info) in enumerate(
+
         data["admin_links"].items(),
+
         start=1
     ):
 
@@ -844,11 +907,13 @@ async def links(
         )
 
         if username:
+
             text += (
                 f"🔹 {username}\n"
             )
 
         text += (
+
             f"🏷 Link Name: {link_name}\n\n"
 
             f"🟢 Joined: {joins}\n"
@@ -861,12 +926,15 @@ async def links(
         )
 
     text += (
+
         "📌 Joined = इस link से group में आने वाले users\n"
         "📌 Left = इस link से आए users में से leave करने वाले\n"
         "📌 Net = Joined - Left"
     )
 
-    await update.message.reply_text(text)
+    await update.message.reply_text(
+        text
+    )
 
 
 # =========================================================
@@ -881,24 +949,4 @@ async def error_handler(
     print(
         "ERROR:",
         context.error
-    )
-
-
-# =========================================================
-# MAIN
-# =========================================================
-
-def main():
-
-    if not BOT_TOKEN:
-
-        raise RuntimeError(
-            "BOT_TOKEN variable missing!"
-        )
-
-    print(
-        "🤖 Bot started..."
-    )
-
-    app = (
-        Applicati
+    
