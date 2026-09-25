@@ -1,7 +1,6 @@
 import os
-import json
+import sqlite3
 from datetime import datetime, timedelta
-from collections import defaultdict
 
 from telegram import Update
 from telegram.ext import (
@@ -17,58 +16,62 @@ from telegram.ext import (
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# TARGET GROUP
+# आपका TARGET GROUP
 TARGET_CHAT_ID = -1004318016710
 
-# DATA FILE
-DATA_FILE = "bot_data.json"
+DB_FILE = "bot_data.db"
 
 
 # =========================================================
-# DATA
+# DATABASE
 # =========================================================
 
-data = {
-    "users": {},
-    "admin_links": {}
-}
+def db_connect():
+    return sqlite3.connect(DB_FILE)
 
 
-# =========================================================
-# LOAD DATA
-# =========================================================
+def init_db():
+    conn = db_connect()
+    cur = conn.cursor()
 
-def load_data():
-    global data
+    # Users / joins
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS joins (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            username TEXT,
+            full_name TEXT,
+            admin_id INTEGER,
+            admin_name TEXT,
+            invite_link TEXT,
+            joined_at TEXT
+        )
+    """)
 
-    try:
-        if os.path.exists(DATA_FILE):
-            with open(DATA_FILE, "r", encoding="utf-8") as f:
-                loaded = json.load(f)
+    # Admin invite links
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS admin_links (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            admin_id INTEGER,
+            admin_name TEXT,
+            invite_link TEXT UNIQUE,
+            created_at TEXT
+        )
+    """)
 
-                if isinstance(loaded, dict):
-                    data.update(loaded)
+    # Leaves
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS leaves (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            username TEXT,
+            full_name TEXT,
+            left_at TEXT
+        )
+    """)
 
-    except Exception as e:
-        print("LOAD ERROR:", e)
-
-
-# =========================================================
-# SAVE DATA
-# =========================================================
-
-def save_data():
-    try:
-        with open(DATA_FILE, "w", encoding="utf-8") as f:
-            json.dump(
-                data,
-                f,
-                ensure_ascii=False,
-                indent=2
-            )
-
-    except Exception as e:
-        print("SAVE ERROR:", e)
+    conn.commit()
+    conn.close()
 
 
 # =========================================================
@@ -79,44 +82,41 @@ def now():
     return datetime.now()
 
 
-def date_string(dt):
-    return dt.strftime("%Y-%m-%d")
+def today_start():
+    n = now()
+    return n.replace(hour=0, minute=0, second=0, microsecond=0)
 
 
-def today():
-    return date_string(now())
-
-
-def yesterday():
-    return date_string(
-        now() - timedelta(days=1)
-    )
+def yesterday_start():
+    return today_start() - timedelta(days=1)
 
 
 def week_start():
     n = now()
-
-    return (
-        n - timedelta(days=n.weekday())
-    ).date()
+    start = today_start()
+    return start - timedelta(days=n.weekday())
 
 
 def month_start():
     n = now()
+    return start_of_month(n)
 
-    return n.replace(
-        day=1
-    ).date()
+
+def start_of_month(dt):
+    return dt.replace(
+        day=1,
+        hour=0,
+        minute=0,
+        second=0,
+        microsecond=0
+    )
 
 
 # =========================================================
 # ADMIN CHECK
 # =========================================================
 
-async def is_admin(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
+async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not update.effective_chat:
         return False
@@ -125,24 +125,14 @@ async def is_admin(
         return False
 
     try:
-
         member = await context.bot.get_chat_member(
             update.effective_chat.id,
             update.effective_user.id
         )
 
-        return member.status in [
-            "administrator",
-            "creator"
-        ]
+        return member.status in ["administrator", "creator"]
 
-    except Exception as e:
-
-        print(
-            "ADMIN CHECK ERROR:",
-            e
-        )
-
+    except Exception:
         return False
 
 
@@ -150,55 +140,74 @@ async def is_admin(
 # TARGET GROUP CHECK
 # =========================================================
 
-def is_target_group(update: Update):
+async def check_target_group(update: Update):
 
     if not update.effective_chat:
         return False
 
-    return (
-        update.effective_chat.id
-        == TARGET_CHAT_ID
-    )
+    if update.effective_chat.id != TARGET_CHAT_ID:
+
+        if update.message:
+            await update.message.reply_text(
+                "❌ यह command सिर्फ TARGET GROUP में use करें।\n\n"
+                f"Target Group ID:\n{TARGET_CHAT_ID}"
+            )
+
+        return False
+
+    return True
 
 
 # =========================================================
-# START
+# BOT ADMIN CHECK
 # =========================================================
 
-async def start(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
+async def bot_is_admin(context):
+
+    try:
+
+        me = await context.bot.get_me()
+
+        member = await context.bot.get_chat_member(
+            TARGET_CHAT_ID,
+            me.id
+        )
+
+        return member.status in ["administrator", "creator"]
+
+    except Exception:
+
+        return False
+
+
+# =========================================================
+# /START
+# =========================================================
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
-
         "✅ Wintask Bot is working!\n\n"
 
-        "📊 STATISTICS\n"
-        "/today - Today's new users\n"
-        "/yesterday - Yesterday's new users\n"
-        "/week - This week's new users\n"
-        "/month - This month's new users\n"
-        "/stats - Complete statistics\n\n"
+        "Commands:\n"
+        "/id - Current chat ID\n"
+        "/today - Today's users\n"
+        "/yesterday - Yesterday's users\n"
+        "/week - This week's users\n"
+        "/month - This month's users\n"
+        "/stats - Complete statistics\n"
+        "/addlink - Create admin invite link\n"
+        "/links - Admin-wise statistics\n\n"
 
-        "🔗 ADMIN LINKS\n"
-        "/mylink - Create your admin invite link\n"
-        "/addlink - Create a NEW admin invite link\n"
-        "/links - Admin-wise link statistics\n\n"
-
-        "ℹ️ OTHER\n"
-        "/id - Current chat ID"
+        "⚠️ Statistics commands TARGET GROUP में use करें।"
     )
 
 
 # =========================================================
-# CHAT ID
+# /ID
 # =========================================================
 
-async def chat_id(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
+async def chat_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not update.message:
         return
@@ -206,22 +215,15 @@ async def chat_id(
     chat = update.effective_chat
 
     await update.message.reply_text(
-
         "🆔 CHAT INFORMATION\n\n"
-
-        f"📌 Name: "
-        f"{chat.title or 'Private Chat'}\n"
-
-        f"💬 Type: "
-        f"{chat.type}\n"
-
-        f"🆔 Chat ID: "
-        f"{chat.id}"
+        f"📌 Name: {chat.title or 'Private Chat'}\n"
+        f"💬 Type: {chat.type}\n"
+        f"🆔 Chat ID: {chat.id}"
     )
 
 
 # =========================================================
-# MEMBER JOIN TRACKING
+# MEMBER JOIN / LEAVE
 # =========================================================
 
 async def member_update(
@@ -234,279 +236,236 @@ async def member_update(
     if not chat_member:
         return
 
-    # Only target group
+    # केवल TARGET GROUP
     if chat_member.chat.id != TARGET_CHAT_ID:
         return
 
-    old_status = (
-        chat_member
-        .old_chat_member
-        .status
-    )
+    old_status = chat_member.old_chat_member.status
+    new_status = chat_member.new_chat_member.status
 
-    new_status = (
-        chat_member
-        .new_chat_member
-        .status
-    )
+    user = chat_member.new_chat_member.user
 
     # =====================================================
-    # NEW USER JOINED
+    # JOIN
     # =====================================================
 
     if (
-        new_status in [
-            "member",
-            "administrator"
-        ]
-        and
-        old_status in [
-            "left",
-            "kicked"
-        ]
+        new_status in ["member", "administrator"]
+        and old_status in ["left", "kicked"]
     ):
 
-        user = (
-            chat_member
-            .new_chat_member
-            .user
-        )
+        invite_link = None
 
-        user_id = str(user.id)
+        try:
+            invite_link = chat_member.invite_link
 
-        join_time = now()
-
-        join_date = date_string(
-            join_time
-        )
-
-        # =================================================
-        # INVITE LINK
-        # =================================================
-
-        invite_link = (
-            chat_member.invite_link
-        )
+        except Exception:
+            invite_link = None
 
         admin_id = None
-        admin_name = None
-        saved_link = ""
+        admin_name = "Unknown"
 
+        # Invite link किस admin की है?
         if invite_link:
 
-            saved_link = (
-                invite_link.invite_link
+            conn = db_connect()
+            cur = conn.cursor()
+
+            cur.execute(
+                """
+                SELECT admin_id, admin_name
+                FROM admin_links
+                WHERE invite_link = ?
+                """,
+                (invite_link.invite_link,)
             )
 
-            if (
-                saved_link
-                in data["admin_links"]
-            ):
+            row = cur.fetchone()
 
-                admin_id = (
-                    data["admin_links"]
-                    [saved_link]
-                    ["admin_id"]
-                )
+            conn.close()
 
-                admin_name = (
-                    data["admin_links"]
-                    [saved_link]
-                    ["admin_name"]
-                )
+            if row:
 
-        # =================================================
-        # SAVE USER
-        # =================================================
+                admin_id = row[0]
+                admin_name = row[1]
 
-        data["users"][user_id] = {
+        conn = db_connect()
+        cur = conn.cursor()
 
-            "user_id": user.id,
-
-            "name": user.full_name,
-
-            "username":
-                user.username or "",
-
-            "joined_at":
-                join_time.isoformat(),
-
-            "date":
-                join_date,
-
-            "admin_id":
+        cur.execute(
+            """
+            INSERT INTO joins
+            (
+                user_id,
+                username,
+                full_name,
                 admin_id,
-
-            "admin_name":
                 admin_name,
-
-            "invite_link":
-                saved_link
-        }
-
-        save_data()
-
-        print(
-            "NEW USER:",
-            user.full_name,
-            "| ADMIN:",
-            admin_name,
-            "| DATE:",
-            join_date
+                invite_link,
+                joined_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                user.id,
+                user.username or "",
+                user.full_name,
+                admin_id,
+                admin_name,
+                invite_link.invite_link if invite_link else None,
+                now().isoformat()
+            )
         )
 
+        conn.commit()
+        conn.close()
 
-# =========================================================
-# GET USERS
-# =========================================================
+    # =====================================================
+    # LEAVE
+    # =====================================================
 
-def get_users():
-
-    return list(
-        data
-        .get("users", {})
-        .values()
-    )
-
-
-# =========================================================
-# TODAY
-# =========================================================
-
-def count_today():
-
-    d = today()
-
-    return sum(
-
-        1
-
-        for user in get_users()
-
-        if user.get("date") == d
-    )
-
-
-# =========================================================
-# YESTERDAY
-# =========================================================
-
-def count_yesterday():
-
-    d = yesterday()
-
-    return sum(
-
-        1
-
-        for user in get_users()
-
-        if user.get("date") == d
-    )
-
-
-# =========================================================
-# WEEK
-# =========================================================
-
-def count_week():
-
-    start = week_start()
-
-    total = 0
-
-    for user in get_users():
-
-        try:
-
-            d = datetime.strptime(
-
-                user.get(
-                    "date",
-                    ""
-                ),
-
-                "%Y-%m-%d"
-
-            ).date()
-
-            if d >= start:
-                total += 1
-
-        except Exception:
-            pass
-
-    return total
-
-
-# =========================================================
-# MONTH
-# =========================================================
-
-def count_month():
-
-    start = month_start()
-
-    total = 0
-
-    for user in get_users():
-
-        try:
-
-            d = datetime.strptime(
-
-                user.get(
-                    "date",
-                    ""
-                ),
-
-                "%Y-%m-%d"
-
-            ).date()
-
-            if d >= start:
-                total += 1
-
-        except Exception:
-            pass
-
-    return total
-
-
-# =========================================================
-# TODAY COMMAND
-# =========================================================
-
-async def today_command(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    if not is_target_group(update):
-
-        await update.message.reply_text(
-            "❌ Ye command sirf target group "
-            "me use karein."
-        )
-
-        return
-
-    if not await is_admin(
-        update,
-        context
+    elif (
+        new_status in ["left", "kicked"]
+        and old_status in ["member", "administrator"]
     ):
+
+        conn = db_connect()
+        cur = conn.cursor()
+
+        cur.execute(
+            """
+            INSERT INTO leaves
+            (
+                user_id,
+                username,
+                full_name,
+                left_at
+            )
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                user.id,
+                user.username or "",
+                user.full_name,
+                now().isoformat()
+            )
+        )
+
+        conn.commit()
+        conn.close()
+
+
+# =========================================================
+# COUNT JOINS
+# =========================================================
+
+def count_joins(start_time, end_time=None):
+
+    conn = db_connect()
+    cur = conn.cursor()
+
+    if end_time:
+
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM joins
+            WHERE joined_at >= ?
+            AND joined_at < ?
+            """,
+            (
+                start_time.isoformat(),
+                end_time.isoformat()
+            )
+        )
+
+    else:
+
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM joins
+            WHERE joined_at >= ?
+            """,
+            (start_time.isoformat(),)
+        )
+
+    result = cur.fetchone()[0]
+
+    conn.close()
+
+    return result
+
+
+# =========================================================
+# COUNT LEAVES
+# =========================================================
+
+def count_leaves(start_time, end_time=None):
+
+    conn = db_connect()
+    cur = conn.cursor()
+
+    if end_time:
+
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM leaves
+            WHERE left_at >= ?
+            AND left_at < ?
+            """,
+            (
+                start_time.isoformat(),
+                end_time.isoformat()
+            )
+        )
+
+    else:
+
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM leaves
+            WHERE left_at >= ?
+            """,
+            (start_time.isoformat(),)
+        )
+
+    result = cur.fetchone()[0]
+
+    conn.close()
+
+    return result
+
+
+# =========================================================
+# /TODAY
+# =========================================================
+
+async def today_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    if not await check_target_group(update):
         return
+
+    if not await is_admin(update, context):
+        return
+
+    start = today_start()
+
+    joins = count_joins(start)
+    leaves = count_leaves(start)
 
     await update.message.reply_text(
-
-        "📅 TODAY USER STATISTICS\n\n"
-
-        f"🟢 Today: {count_today()}"
+        "🟢 TODAY STATISTICS\n\n"
+        f"📥 New Users: {joins}\n"
+        f"📤 Leaves: {leaves}\n\n"
+        f"🆔 Group ID: {TARGET_CHAT_ID}"
     )
 
 
 # =========================================================
-# YESTERDAY COMMAND
+# /YESTERDAY
 # =========================================================
 
 async def yesterday_command(
@@ -514,65 +473,53 @@ async def yesterday_command(
     context: ContextTypes.DEFAULT_TYPE
 ):
 
-    if not is_target_group(update):
-
-        await update.message.reply_text(
-            "❌ Ye command sirf target group "
-            "me use karein."
-        )
-
+    if not await check_target_group(update):
         return
 
-    if not await is_admin(
-        update,
-        context
-    ):
+    if not await is_admin(update, context):
         return
+
+    start = yesterday_start()
+    end = today_start()
+
+    joins = count_joins(start, end)
+    leaves = count_leaves(start, end)
 
     await update.message.reply_text(
-
-        "📅 YESTERDAY USER STATISTICS\n\n"
-
-        f"🟡 Yesterday: "
-        f"{count_yesterday()}"
+        "🟡 YESTERDAY STATISTICS\n\n"
+        f"📥 New Users: {joins}\n"
+        f"📤 Leaves: {leaves}\n\n"
+        f"🆔 Group ID: {TARGET_CHAT_ID}"
     )
 
 
 # =========================================================
-# WEEK COMMAND
+# /WEEK
 # =========================================================
 
-async def week_command(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
+async def week_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    if not is_target_group(update):
-
-        await update.message.reply_text(
-            "❌ Ye command sirf target group "
-            "me use karein."
-        )
-
+    if not await check_target_group(update):
         return
 
-    if not await is_admin(
-        update,
-        context
-    ):
+    if not await is_admin(update, context):
         return
+
+    start = week_start()
+
+    joins = count_joins(start)
+    leaves = count_leaves(start)
 
     await update.message.reply_text(
-
-        "📅 WEEKLY USER STATISTICS\n\n"
-
-        f"🔵 This Week: "
-        f"{count_week()}"
+        "🔵 THIS WEEK STATISTICS\n\n"
+        f"📥 New Users: {joins}\n"
+        f"📤 Leaves: {leaves}\n\n"
+        f"🗓️ Week started: {start.strftime('%d-%m-%Y')}"
     )
 
 
 # =========================================================
-# MONTH COMMAND
+# /MONTH
 # =========================================================
 
 async def month_command(
@@ -580,235 +527,107 @@ async def month_command(
     context: ContextTypes.DEFAULT_TYPE
 ):
 
-    if not is_target_group(update):
-
-        await update.message.reply_text(
-            "❌ Ye command sirf target group "
-            "me use karein."
-        )
-
+    if not await check_target_group(update):
         return
 
-    if not await is_admin(
-        update,
-        context
-    ):
+    if not await is_admin(update, context):
         return
+
+    start = month_start()
+
+    joins = count_joins(start)
+    leaves = count_leaves(start)
 
     await update.message.reply_text(
-
-        "📅 MONTHLY USER STATISTICS\n\n"
-
-        f"🟣 This Month: "
-        f"{count_month()}"
+        "🟣 THIS MONTH STATISTICS\n\n"
+        f"📥 New Users: {joins}\n"
+        f"📤 Leaves: {leaves}\n\n"
+        f"🗓️ Month: {now().strftime('%B %Y')}"
     )
 
 
 # =========================================================
-# COMPLETE STATS
+# /STATS
 # =========================================================
 
-async def stats(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
+async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    if not is_target_group(update):
-
-        await update.message.reply_text(
-            "❌ /stats sirf target group "
-            "me use karein."
-        )
-
+    if not await check_target_group(update):
         return
 
-    if not await is_admin(
-        update,
-        context
-    ):
+    if not await is_admin(update, context):
         return
 
     try:
 
-        target_chat = (
-            await context.bot.get_chat(
-                TARGET_CHAT_ID
-            )
-        )
-
-        group_name = (
-            target_chat.title
-        )
-
-    except Exception:
-
-        group_name = "Target Group"
-
-    await update.message.reply_text(
-
-        "📊 GROUP USER STATISTICS\n"
-        "━━━━━━━━━━━━━━━━━━━━\n\n"
-
-        f"👥 Group:\n"
-        f"{group_name}\n\n"
-
-        "📥 NEW USERS\n\n"
-
-        f"🟢 Today: "
-        f"{count_today()}\n"
-
-        f"🟡 Yesterday: "
-        f"{count_yesterday()}\n"
-
-        f"🔵 This Week: "
-        f"{count_week()}\n"
-
-        f"🟣 This Month: "
-        f"{count_month()}\n"
-
-        f"⚪ Total: "
-        f"{len(get_users())}\n\n"
-
-        "━━━━━━━━━━━━━━━━━━━━\n"
-
-        f"🆔 Group ID:\n"
-        f"{TARGET_CHAT_ID}"
-    )
-
-
-# =========================================================
-# CREATE ADMIN LINK FUNCTION
-# =========================================================
-
-async def create_admin_link(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    if not is_target_group(update):
-
-        await update.message.reply_text(
-            "❌ Ye command sirf target group "
-            "me use karein."
-        )
-
-        return
-
-    if not await is_admin(
-        update,
-        context
-    ):
-
-        await update.message.reply_text(
-            "❌ Sirf group admins "
-            "ye command use kar sakte hain."
-        )
-
-        return
-
-    admin = update.effective_user
-
-    admin_id = str(admin.id)
-
-    admin_name = admin.full_name
-
-    try:
-
-        # =================================================
-        # CREATE NEW UNIQUE INVITE LINK
-        # =================================================
-
-        invite = (
-            await context.bot
-            .create_chat_invite_link(
-
-                chat_id=TARGET_CHAT_ID,
-
-                name=(
-                    f"{admin_name}"
-                ),
-
-                creates_join_request=False
-            )
-        )
-
-        link = invite.invite_link
-
-        # =================================================
-        # SAVE ADMIN LINK
-        # =================================================
-
-        data["admin_links"][link] = {
-
-            "admin_id":
-                admin_id,
-
-            "admin_name":
-                admin_name,
-
-            "created_at":
-                now().isoformat()
-        }
-
-        save_data()
-
-        await update.message.reply_text(
-
-            "🔗 NEW ADMIN INVITE LINK\n"
-            "━━━━━━━━━━━━━━━━━━━━\n\n"
-
-            f"👤 Admin:\n"
-            f"{admin_name}\n\n"
-
-            f"🆔 Admin ID:\n"
-            f"{admin.id}\n\n"
-
-            "🔗 Invite Link:\n"
-            f"{link}\n\n"
-
-            "👥 Is link se jo users "
-            "join karenge wo isi admin "
-            "ke naam par count honge.\n\n"
-
-            "📊 Users dekhne ke liye:\n"
-            "/links"
-        )
+        target_chat = await context.bot.get_chat(TARGET_CHAT_ID)
 
     except Exception as e:
 
         await update.message.reply_text(
-
-            "❌ New admin link create "
-            "nahi ho payi.\n\n"
-
-            f"Error: "
-            f"{type(e).__name__}\n"
-
-            f"Details: {e}\n\n"
-
-            "⚠️ Bot target group me ADMIN "
-            "hona chahiye aur invite "
-            "users permission honi chahiye."
+            "❌ Target group access error!\n\n"
+            f"{e}"
         )
 
+        return
 
-# =========================================================
-# MYLINK
-# =========================================================
+    if not await bot_is_admin(context):
 
-async def mylink(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
+        await update.message.reply_text(
+            "❌ Bot target group में ADMIN नहीं है।\n\n"
+            "Bot को group में ADMIN बनाइए।"
+        )
 
-    await create_admin_link(
-        update,
-        context
+        return
+
+    today = count_joins(today_start())
+
+    yesterday = count_joins(
+        yesterday_start(),
+        today_start()
+    )
+
+    week = count_joins(week_start())
+
+    month = count_joins(month_start())
+
+    conn = db_connect()
+    cur = conn.cursor()
+
+    cur.execute("SELECT COUNT(*) FROM joins")
+    total = cur.fetchone()[0]
+
+    cur.execute("SELECT COUNT(*) FROM leaves")
+    total_leaves = cur.fetchone()[0]
+
+    conn.close()
+
+    await update.message.reply_text(
+
+        "📊 GROUP USER STATISTICS\n"
+        "━━━━━━━━━━━━━━━━━━\n\n"
+
+        f"👥 Group:\n"
+        f"{target_chat.title}\n\n"
+
+        "📥 NEW USERS\n\n"
+
+        f"🟢 Today: {today}\n"
+        f"🟡 Yesterday: {yesterday}\n"
+        f"🔵 This Week: {week}\n"
+        f"🟣 This Month: {month}\n"
+        f"⚪ Total: {total}\n\n"
+
+        "📤 LEAVES\n"
+        f"Total Leaves: {total_leaves}\n\n"
+
+        "━━━━━━━━━━━━━━━━━━\n"
+        f"🆔 Group ID:\n{TARGET_CHAT_ID}"
     )
 
 
 # =========================================================
-# ADDLINK
+# /ADDLINK
 # =========================================================
 
 async def addlink(
@@ -816,117 +635,210 @@ async def addlink(
     context: ContextTypes.DEFAULT_TYPE
 ):
 
-    await create_admin_link(
-        update,
-        context
-    )
+    if not await check_target_group(update):
+        return
 
+    if not await is_admin(update, context):
+        await update.message.reply_text(
+            "❌ यह command सिर्फ group admins use कर सकते हैं।"
+        )
+        return
 
-# =========================================================
-# ADMIN-WISE LINKS
-# =========================================================
-
-async def links(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    if not is_target_group(update):
+    if not await bot_is_admin(context):
 
         await update.message.reply_text(
-            "❌ /links sirf target group "
-            "me use karein."
+            "❌ पहले bot को target group में ADMIN बनाइए।"
         )
 
         return
 
-    if not await is_admin(
-        update,
-        context
-    ):
+    admin = update.effective_user
+
+    try:
+
+        # Admin के नाम से unique invite link
+        link = await context.bot.create_chat_invite_link(
+            chat_id=TARGET_CHAT_ID,
+            name=admin.full_name[:32],
+            creates_join_request=False
+        )
+
+        conn = db_connect()
+        cur = conn.cursor()
+
+        cur.execute(
+            """
+            INSERT OR REPLACE INTO admin_links
+            (
+                admin_id,
+                admin_name,
+                invite_link,
+                created_at
+            )
+            VALUES (?, ?, ?, ?)
+            """,
+            (
+                admin.id,
+                admin.full_name,
+                link.invite_link,
+                now().isoformat()
+            )
+        )
+
+        conn.commit()
+        conn.close()
+
+        await update.message.reply_text(
+            "✅ ADMIN LINK CREATED\n\n"
+            f"👤 Admin: {admin.full_name}\n\n"
+            f"🔗 Invite Link:\n{link.invite_link}\n\n"
+            "⚠️ इस link से आने वाले users इसी admin के नाम पर count होंगे."
+        )
+
+    except Exception as e:
+
+        await update.message.reply_text(
+            "❌ Link create नहीं हो पाई.\n\n"
+            f"Error: {type(e).__name__}\n"
+            f"Details: {e}\n\n"
+            "Bot को group में invite users की permission वाला ADMIN बनाइए."
+        )
+
+
+# =========================================================
+# /LINKS
+# =========================================================
+
+async def links(update: Update, context: ContextTypes.DEFAULT_TYPE):
+
+    if not await check_target_group(update):
         return
 
-    admin_stats = defaultdict(
-        lambda: {
-            "name": "",
-            "count": 0
-        }
+    if not await is_admin(update, context):
+        return
+
+    conn = db_connect()
+    cur = conn.cursor()
+
+    cur.execute(
+        """
+        SELECT
+            admin_id,
+            admin_name,
+            invite_link
+        FROM admin_links
+        ORDER BY id DESC
+        """
     )
 
-    # =====================================================
-    # COUNT USERS BY ADMIN
-    # =====================================================
+    admin_links = cur.fetchall()
 
-    for user in get_users():
+    if not admin_links:
 
-        admin_id = user.get(
-            "admin_id"
+        conn.close()
+
+        await update.message.reply_text(
+            "📊 ADMIN LINKS\n\n"
+            "अभी कोई admin link नहीं बनी है.\n\n"
+            "नई link बनाने के लिए:\n"
+            "/addlink"
         )
 
-        if not admin_id:
-            continue
+        return
 
-        admin_name = user.get(
-            "admin_name",
-            "Unknown Admin"
+    text = "📊 ADMIN-WISE STATISTICS\n"
+    text += "━━━━━━━━━━━━━━━━━━\n\n"
+
+    for admin_id, admin_name, invite_link in admin_links:
+
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM joins
+            WHERE admin_id = ?
+            """,
+            (admin_id,)
         )
 
-        admin_stats[
-            admin_id
-        ]["name"] = admin_name
+        total = cur.fetchone()[0]
 
-        admin_stats[
-            admin_id
-        ]["count"] += 1
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM joins
+            WHERE admin_id = ?
+            AND joined_at >= ?
+            """,
+            (
+                admin_id,
+                today_start().isoformat()
+            )
+        )
 
-    # =====================================================
-    # RESULT
-    # =====================================================
+        today_count = cur.fetchone()[0]
 
-    text = (
-        "🔗 ADMIN-WISE USER STATISTICS\n"
-        "━━━━━━━━━━━━━━━━━━━━\n\n"
-    )
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM joins
+            WHERE admin_id = ?
+            AND joined_at >= ?
+            AND joined_at < ?
+            """,
+            (
+                admin_id,
+                yesterday_start().isoformat(),
+                today_start().isoformat()
+            )
+        )
 
-    if not admin_stats:
+        yesterday_count = cur.fetchone()[0]
+
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM joins
+            WHERE admin_id = ?
+            AND joined_at >= ?
+            """,
+            (
+                admin_id,
+                week_start().isoformat()
+            )
+        )
+
+        week_count = cur.fetchone()[0]
+
+        cur.execute(
+            """
+            SELECT COUNT(*)
+            FROM joins
+            WHERE admin_id = ?
+            AND joined_at >= ?
+            """,
+            (
+                admin_id,
+                month_start().isoformat()
+            )
+        )
+
+        month_count = cur.fetchone()[0]
 
         text += (
-            "❌ Abhi kisi admin ki link "
-            "se koi user track nahi hua."
+            f"👤 {admin_name}\n"
+            f"🆔 Admin ID: {admin_id}\n\n"
+            f"🟢 Today: {today_count}\n"
+            f"🟡 Yesterday: {yesterday_count}\n"
+            f"🔵 This Week: {week_count}\n"
+            f"🟣 This Month: {month_count}\n"
+            f"⚪ Total: {total}\n\n"
+            f"🔗 {invite_link}\n"
+            f"━━━━━━━━━━━━━━━━━━\n\n"
         )
 
-    else:
+    conn.close()
 
-        number = 1
-
-        for admin_id, info in (
-            admin_stats.items()
-        ):
-
-            text += (
-
-                f"{number}. 👤 "
-                f"{info['name']}\n"
-
-                f"   🆔 Admin ID: "
-                f"{admin_id}\n"
-
-                f"   👥 Users: "
-                f"{info['count']}\n\n"
-            )
-
-            number += 1
-
-    text += (
-        "━━━━━━━━━━━━━━━━━━━━\n"
-
-        f"📊 Total tracked users: "
-        f"{len(get_users())}"
-    )
-
-    await update.message.reply_text(
-        text
-    )
+    await update.message.reply_text(text)
 
 
 # =========================================================
@@ -938,10 +850,7 @@ async def error_handler(
     context: ContextTypes.DEFAULT_TYPE
 ):
 
-    print(
-        "ERROR:",
-        context.error
-    )
+    print("ERROR:", context.error)
 
 
 # =========================================================
@@ -956,11 +865,10 @@ def main():
             "BOT_TOKEN variable missing!"
         )
 
-    print(
-        "🤖 Wintask Bot started..."
-    )
+    # Database बनाओ
+    init_db()
 
-    load_data()
+    print("🤖 Wintask Bot started...")
 
     app = (
         Application
@@ -974,80 +882,20 @@ def main():
     # =====================================================
 
     app.add_handler(
-        CommandHandler(
-            "start",
-            start
-        )
+        CommandHandler("start", start)
     )
 
     app.add_handler(
-        CommandHandler(
-            "id",
-            chat_id
-        )
+        CommandHandler("id", chat_id)
     )
 
     app.add_handler(
-        CommandHandler(
-            "today",
-            today_command
-        )
+        CommandHandler("stats", stats)
     )
 
     app.add_handler(
-        CommandHandler(
-            "yesterday",
-            yesterday_command
-        )
+        CommandHandler("today", today_command)
     )
 
     app.add_handler(
-        CommandHandler(
-            "week",
-            week_command
-        )
-    )
-
-    app.add_handler(
-        CommandHandler(
-            "month",
-            month_command
-        )
-    )
-
-    app.add_handler(
-        CommandHandler(
-            "stats",
-            stats
-        )
-    )
-
-    app.add_handler(
-        CommandHandler(
-            "mylink",
-            mylink
-        )
-    )
-
-    app.add_handler(
-        CommandHandler(
-            "addlink",
-            addlink
-        )
-    )
-
-    app.add_handler(
-        CommandHandler(
-            "links",
-            links
-        )
-    )
-
-    # =====================================================
-    # MEMBER TRACKING
-    # =====================================================
-
-    app.add_handler(
-        ChatMemberHandler(
-            member_update,
-            ChatMemberHandl
+        CommandHandler("yesterday", yesterday_comm
