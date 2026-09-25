@@ -1,6 +1,7 @@
 import os
 import json
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from telegram import Update
 from telegram.ext import (
@@ -17,12 +18,17 @@ from telegram.ext import (
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# TARGET GROUP
-# Jiske users ka JOIN / LEFT track karna hai
+# Jis group ke users track karne hain
 TARGET_CHAT_ID = -1004318016710
 
-# REPORT / COMMAND GROUP
-COMMAND_CHAT_ID = -1003353359019
+# Agar COMMAND_CHAT_ID Railway Variables me nahi hai,
+# to commands TARGET_CHAT_ID wale group me chalengi.
+COMMAND_CHAT_ID = int(
+    os.getenv("COMMAND_CHAT_ID", str(TARGET_CHAT_ID))
+)
+
+# India time
+IST = ZoneInfo("Asia/Kolkata")
 
 DATA_FILE = "bot_data.json"
 
@@ -76,8 +82,12 @@ def save_data():
 # DATE
 # =========================================================
 
+def now_ist():
+    return datetime.now(IST)
+
+
 def today():
-    return datetime.now().strftime("%Y-%m-%d")
+    return now_ist().strftime("%Y-%m-%d")
 
 
 def date_string(d):
@@ -88,7 +98,10 @@ def date_string(d):
 # ADMIN CHECK
 # =========================================================
 
-async def is_admin(update, context):
+async def is_admin(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
 
     if not update.effective_chat:
         return False
@@ -115,32 +128,37 @@ async def is_admin(update, context):
 # COMMAND GROUP CHECK
 # =========================================================
 
-def is_command_group(update):
+def is_command_group(update: Update):
 
     if not update.effective_chat:
         return False
 
-    return update.effective_chat.id == COMMAND_CHAT_ID
+    return (
+        COMMAND_CHAT_ID == 0
+        or update.effective_chat.id == COMMAND_CHAT_ID
+    )
 
 
 # =========================================================
 # /start
 # =========================================================
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def start(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
 
     await update.message.reply_text(
         "✅ Wintask Bot is working!\n\n"
-        "📌 COMMANDS\n"
-        "━━━━━━━━━━━━━━━━━━━━\n\n"
-        "/id - Current chat ID\n"
+        "📌 Commands:\n\n"
+        "/id - Current Chat ID\n"
         "/stats - Complete statistics\n"
         "/today - Today's statistics\n"
         "/yesterday - Yesterday's statistics\n"
-        "/mylink - Your admin links\n"
-        "/addlink NAME - Create new link\n"
+        "/addlink NAME - Create new admin link\n"
         "/addlink NAME LINK - Add existing link\n"
-        "/links - Admin/link-wise statistics"
+        "/mylink - Your admin links\n"
+        "/links - Admin-wise statistics"
     )
 
 
@@ -148,7 +166,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # /id
 # =========================================================
 
-async def chat_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def chat_id(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
 
     chat = update.effective_chat
 
@@ -171,7 +192,7 @@ async def chat_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # =========================================================
-# MEMBER UPDATE
+# MEMBER TRACKING
 # =========================================================
 
 async def member_update(
@@ -184,33 +205,36 @@ async def member_update(
     if not cm:
         return
 
-    # Only target group
+    # Sirf target group track hoga
     if cm.chat.id != TARGET_CHAT_ID:
         return
 
-    old_status = cm.old_chat_member.status
-    new_status = cm.new_chat_member.status
+    old = cm.old_chat_member.status
+    new = cm.new_chat_member.status
 
     user = cm.new_chat_member.user
-    user_id = str(user.id)
+    uid = str(user.id)
 
     # =====================================================
-    # JOIN
+    # USER JOINED
     # =====================================================
 
-    if (
-        new_status in ("member", "administrator")
-        and old_status in ("left", "kicked")
+    if new in (
+        "member",
+        "administrator"
+    ) and old in (
+        "left",
+        "kicked"
     ):
 
         d = today()
 
-        # Total join count
+        # Overall join count
         data["joins"][d] = (
             data["joins"].get(d, 0) + 1
         )
 
-        # Invite link used by the user
+        # Invite link used by user
         invite = cm.invite_link
 
         if invite:
@@ -221,7 +245,7 @@ async def member_update(
 
                 info = data["admin_links"][url]
 
-                # Total joins for this link
+                # Total joins
                 info["joins"] = (
                     info.get("joins", 0) + 1
                 )
@@ -242,7 +266,7 @@ async def member_update(
                     {}
                 )
 
-                users[user_id] = {
+                users[uid] = {
                     "name": user.full_name,
                     "username": (
                         "@" + user.username
@@ -251,40 +275,41 @@ async def member_update(
                     )
                 }
 
-                # Remember link for future LEFT
-                data["user_links"][user_id] = url
+                # Remember user's link
+                data["user_links"][uid] = url
 
         save_data()
 
     # =====================================================
-    # LEFT
+    # USER LEFT
     # =====================================================
 
-    elif (
-        new_status in ("left", "kicked")
-        and old_status in ("member", "administrator")
+    elif new in (
+        "left",
+        "kicked"
+    ) and old in (
+        "member",
+        "administrator"
     ):
 
         d = today()
 
-        # Total leaves
+        # Overall leave count
         data["leaves"][d] = (
             data["leaves"].get(d, 0) + 1
         )
 
-        # Find user's original invite link
-        url = data["user_links"].get(user_id)
+        # Previous invite link
+        url = data["user_links"].get(uid)
 
         if url and url in data["admin_links"]:
 
             info = data["admin_links"][url]
 
-            # Total leaves for this link
             info["leaves"] = (
                 info.get("leaves", 0) + 1
             )
 
-            # Daily leaves
             daily_leaves = info.setdefault(
                 "daily_leaves",
                 {}
@@ -309,18 +334,17 @@ async def stats(
     if not is_command_group(update):
 
         await update.message.reply_text(
-            "❌ Ye command report group me use karein."
+            "❌ Is chat me commands allowed nahi hain."
         )
         return
 
     if not await is_admin(update, context):
 
         await update.message.reply_text(
-            "❌ Sirf admin ye report dekh sakta hai."
+            "❌ Ye command sirf admin use kar sakta hai."
         )
         return
 
-    # Target group check
     try:
 
         target = await context.bot.get_chat(
@@ -345,13 +369,12 @@ async def stats(
     except Exception as e:
 
         await update.message.reply_text(
-            "❌ Target group error:\n\n"
-            f"{e}\n\n"
-            f"Target ID: {TARGET_CHAT_ID}"
+            f"❌ Target group error:\n{e}"
         )
         return
 
-    td = datetime.now().date()
+    td = now_ist().date()
+
     yd = td - timedelta(days=1)
 
     week_start = (
@@ -375,15 +398,15 @@ async def stats(
     total_join = 0
     total_left = 0
 
-    # -----------------------------------------------------
+    # =====================================================
     # JOINS
-    # -----------------------------------------------------
+    # =====================================================
 
-    for key, count in data["joins"].items():
+    for k, count in data["joins"].items():
 
         try:
             d = datetime.strptime(
-                key,
+                k,
                 "%Y-%m-%d"
             ).date()
 
@@ -404,15 +427,15 @@ async def stats(
         if month_start <= d <= td:
             month_join += count
 
-    # -----------------------------------------------------
+    # =====================================================
     # LEAVES
-    # -----------------------------------------------------
+    # =====================================================
 
-    for key, count in data["leaves"].items():
+    for k, count in data["leaves"].items():
 
         try:
             d = datetime.strptime(
-                key,
+                k,
                 "%Y-%m-%d"
             ).date()
 
@@ -433,8 +456,11 @@ async def stats(
         if month_start <= d <= td:
             month_left += count
 
-    await update.message.reply_text(
+    # =====================================================
+    # REPORT
+    # =====================================================
 
+    text = (
         "📊 GROUP USER STATISTICS\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
 
@@ -466,10 +492,10 @@ async def stats(
         f"🔴 Left: {total_left}\n"
         f"👥 Net: {total_join - total_left}\n\n"
 
-        "━━━━━━━━━━━━━━━━━━━━\n"
-        f"🆔 Target Group ID:\n"
-        f"{TARGET_CHAT_ID}"
+        f"🆔 Group ID: {TARGET_CHAT_ID}"
     )
+
+    await update.message.reply_text(text)
 
 
 # =========================================================
@@ -484,59 +510,43 @@ async def today_stats(
     if not is_command_group(update):
 
         await update.message.reply_text(
-            "❌ Ye command report group me use karein."
+            "❌ Is chat me commands allowed nahi hain."
         )
         return
 
     if not await is_admin(update, context):
 
         await update.message.reply_text(
-            "❌ Sirf admin ye report dekh sakta hai."
+            "❌ Ye command sirf admin use kar sakta hai."
         )
         return
 
-    d = datetime.now().date()
-    key = date_string(d)
+    d = now_ist().date()
 
-    total_joined = data["joins"].get(
-        key,
-        0
-    )
+    k = date_string(d)
 
-    total_left = data["leaves"].get(
-        key,
-        0
-    )
+    total_joined = data["joins"].get(k, 0)
+    total_left = data["leaves"].get(k, 0)
 
     text = (
         "🟢 TODAY USER STATISTICS\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"📅 Date: {key}\n\n"
+        f"📅 Date: {k}\n\n"
     )
 
     found = False
 
     for url, info in data["admin_links"].items():
 
-        daily = info.get(
-            "daily",
-            {}
-        )
+        daily = info.get("daily", {})
 
         daily_leaves = info.get(
             "daily_leaves",
             {}
         )
 
-        joined = daily.get(
-            key,
-            0
-        )
-
-        left = daily_leaves.get(
-            key,
-            0
-        )
+        joined = daily.get(k, 0)
+        left = daily_leaves.get(k, 0)
 
         if joined == 0 and left == 0:
             continue
@@ -568,7 +578,7 @@ async def today_stats(
             )
 
         text += (
-            f"🔗 Link Name: {link_name}\n"
+            f"🔗 Link: {link_name}\n"
             f"🟢 Joined: {joined}\n"
             f"🔴 Left: {left}\n"
             f"👥 Net: {joined - left}\n"
@@ -578,8 +588,8 @@ async def today_stats(
     if not found:
 
         text += (
-            "ℹ️ Aaj kisi registered admin link "
-            "se Join/Left record nahi mila.\n\n"
+            "ℹ️ Aaj kisi admin link se "
+            "koi Join/Left record nahi mila.\n\n"
         )
 
     text += (
@@ -605,63 +615,43 @@ async def yesterday_stats(
     if not is_command_group(update):
 
         await update.message.reply_text(
-            "❌ Ye command report group me use karein."
+            "❌ Is chat me commands allowed nahi hain."
         )
         return
 
     if not await is_admin(update, context):
 
         await update.message.reply_text(
-            "❌ Sirf admin ye report dekh sakta hai."
+            "❌ Ye command sirf admin use kar sakta hai."
         )
         return
 
-    d = (
-        datetime.now().date()
-        - timedelta(days=1)
-    )
+    d = now_ist().date() - timedelta(days=1)
 
-    key = date_string(d)
+    k = date_string(d)
 
-    total_joined = data["joins"].get(
-        key,
-        0
-    )
-
-    total_left = data["leaves"].get(
-        key,
-        0
-    )
+    total_joined = data["joins"].get(k, 0)
+    total_left = data["leaves"].get(k, 0)
 
     text = (
         "🟡 YESTERDAY USER STATISTICS\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
-        f"📅 Date: {key}\n\n"
+        f"📅 Date: {k}\n\n"
     )
 
     found = False
 
     for url, info in data["admin_links"].items():
 
-        daily = info.get(
-            "daily",
-            {}
-        )
+        daily = info.get("daily", {})
 
         daily_leaves = info.get(
             "daily_leaves",
             {}
         )
 
-        joined = daily.get(
-            key,
-            0
-        )
-
-        left = daily_leaves.get(
-            key,
-            0
-        )
+        joined = daily.get(k, 0)
+        left = daily_leaves.get(k, 0)
 
         if joined == 0 and left == 0:
             continue
@@ -693,7 +683,7 @@ async def yesterday_stats(
             )
 
         text += (
-            f"🔗 Link Name: {link_name}\n"
+            f"🔗 Link: {link_name}\n"
             f"🟢 Joined: {joined}\n"
             f"🔴 Left: {left}\n"
             f"👥 Net: {joined - left}\n"
@@ -703,8 +693,8 @@ async def yesterday_stats(
     if not found:
 
         text += (
-            "ℹ️ Kal kisi registered admin link "
-            "se Join/Left record nahi mila.\n\n"
+            "ℹ️ Kal kisi admin link se "
+            "koi Join/Left record nahi mila.\n\n"
         )
 
     text += (
@@ -730,22 +720,22 @@ async def addlink(
     if not is_command_group(update):
 
         await update.message.reply_text(
-            "❌ Ye command report group me use karein."
+            "❌ Is chat me commands allowed nahi hain."
         )
         return
 
     if not await is_admin(update, context):
 
         await update.message.reply_text(
-            "❌ Sirf group admin ye command use kar sakta hai."
+            "❌ Sirf group admin naya invite link add kar sakta hai."
         )
         return
 
     if not context.args:
 
         await update.message.reply_text(
-            "❌ Link name den.\n\n"
-            "New link:\n"
+            "❌ Link ka naam den.\n\n"
+            "Naya link:\n"
             "/addlink Sachin\n\n"
             "Existing link:\n"
             "/addlink Sachin https://t.me/+XXXX"
@@ -757,14 +747,14 @@ async def addlink(
     if not name:
 
         await update.message.reply_text(
-            "❌ Link name empty nahi ho sakta."
+            "❌ Link name khali nahi ho sakta."
         )
         return
 
     user = update.effective_user
 
     # =====================================================
-    # EXISTING LINK ADD
+    # EXISTING LINK
     # =====================================================
 
     if len(context.args) >= 2:
@@ -777,7 +767,7 @@ async def addlink(
         ):
 
             await update.message.reply_text(
-                "❌ Sahi Telegram invite link den.\n\n"
+                "❌ Sahi Telegram invite link dein.\n\n"
                 "Example:\n"
                 "/addlink Sachin https://t.me/+XXXX"
             )
@@ -786,55 +776,36 @@ async def addlink(
         if link in data["admin_links"]:
 
             await update.message.reply_text(
-                "❌ Ye link pehle se registered hai."
+                "❌ Ye link pehle se added hai."
             )
             return
 
         data["admin_links"][link] = {
-
             "admin_id": user.id,
-
             "admin_name": user.full_name,
-
             "username": (
                 "@" + user.username
                 if user.username
                 else ""
             ),
-
             "link_name": name,
-
             "joins": 0,
-
             "leaves": 0,
-
             "daily": {},
-
             "daily_leaves": {},
-
             "users": {}
         }
 
         save_data()
 
         await update.message.reply_text(
-
             "✅ EXISTING ADMIN LINK ADDED\n"
             "━━━━━━━━━━━━━━━━━━━━\n\n"
-
-            f"👤 Admin:\n"
-            f"{user.full_name}\n\n"
-
-            f"🏷 Link Name:\n"
-            f"{name}\n\n"
-
-            f"🔗 Link:\n"
-            f"{link}\n\n"
-
-            "📊 Statistics:\n"
-            "🟢 Joined: 0\n"
-            "🔴 Left: 0\n"
-            "👥 Net: 0"
+            f"👤 Admin: {user.full_name}\n"
+            f"🔗 Link Name: {name}\n"
+            f"🔗 Link: {link}\n\n"
+            "Ab is link se aane wale users "
+            "ka Join/Leave record rakha jayega."
         )
 
         return
@@ -853,46 +824,29 @@ async def addlink(
         link = invite.invite_link
 
         data["admin_links"][link] = {
-
             "admin_id": user.id,
-
             "admin_name": user.full_name,
-
             "username": (
                 "@" + user.username
                 if user.username
                 else ""
             ),
-
             "link_name": name,
-
             "joins": 0,
-
             "leaves": 0,
-
             "daily": {},
-
             "daily_leaves": {},
-
             "users": {}
         }
 
         save_data()
 
         await update.message.reply_text(
-
             "🔗 NEW ADMIN INVITE LINK\n"
             "━━━━━━━━━━━━━━━━━━━━\n\n"
-
-            f"👤 Admin:\n"
-            f"{user.full_name}\n\n"
-
-            f"🏷 Link Name:\n"
-            f"{name}\n\n"
-
-            f"🔗 Link:\n"
-            f"{link}\n\n"
-
+            f"👤 Admin: {user.full_name}\n"
+            f"🔗 Link Name: {name}\n"
+            f"🔗 Link:\n{link}\n\n"
             "📊 Statistics:\n"
             "🟢 Joined: 0\n"
             "🔴 Left: 0\n"
@@ -902,13 +856,10 @@ async def addlink(
     except Exception as e:
 
         await update.message.reply_text(
-
             "❌ Invite link nahi ban paya.\n\n"
-
             f"Error:\n{e}\n\n"
-
-            "⚠️ Check karein ki bot target group "
-            "me ADMIN hai aur Invite Users permission hai."
+            "⚠️ Bot target group me ADMIN hona chahiye "
+            "aur Invite Users permission honi chahiye."
         )
 
 
@@ -924,15 +875,31 @@ async def mylink(
     if not is_command_group(update):
 
         await update.message.reply_text(
-            "❌ Ye command report group me use karein."
+            "❌ Is chat me commands allowed nahi hain."
         )
         return
 
     if not await is_admin(update, context):
 
         await update.message.reply_text(
-            "❌ Sirf admin ye command use kar sakta hai."
+            "❌ Ye command sirf admin use kar sakta hai."
         )
         return
 
-   
+    uid = update.effective_user.id
+
+    found = False
+
+    text = (
+        "🔗 YOUR ADMIN LINKS\n"
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+    )
+
+    for url, info in data["admin_links"].items():
+
+        if info.get("admin_id") != uid:
+            continue
+
+        found = True
+
+        joined = info.get
