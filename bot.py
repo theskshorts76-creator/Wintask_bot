@@ -1,55 +1,104 @@
 import os
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 
 from telegram import Update
 from telegram.ext import (
     Application,
     CommandHandler,
     ContextTypes,
-    MessageHandler,
-    filters,
+    ChatMemberHandler,
 )
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# India Standard Time
-IST = timezone(timedelta(hours=5, minutes=30))
+# =========================================================
+# TARGET GROUP
+# Isi group ke members ke JOIN / LEAVE track honge
+# =========================================================
+TARGET_CHAT_ID = 100431801671
 
-# Target group:
-# Work From Home 100-300RS Earn
-TARGET_CHAT_ID = -100431801671
+# IST timezone
+IST = timezone(timedelta(hours=5, minutes=30))
 
 # Daily statistics
 daily_stats = {}
 
 
-def get_today_key():
-    return datetime.now(IST).strftime("%Y-%m-%d")
+# =========================================================
+# CHECK ADMIN
+# =========================================================
+async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.effective_user or not update.effective_chat:
+        return False
+
+    try:
+        member = await context.bot.get_chat_member(
+            update.effective_chat.id,
+            update.effective_user.id
+        )
+
+        return member.status in ["administrator", "creator"]
+
+    except Exception:
+        return False
 
 
+# =========================================================
+# START
+# =========================================================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("✅ Bot is working!")
 
-
-async def get_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    chat_id = update.effective_chat.id
+    if not await is_admin(update, context):
+        return
 
     await update.message.reply_text(
-        f"🆔 Chat ID:\n`{chat_id}`",
-        parse_mode="Markdown"
+        "✅ Bot is working!"
     )
 
 
-async def member_joined(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# =========================================================
+# TRACK TARGET GROUP MEMBERS
+# =========================================================
+async def track_member(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE
+):
 
-    # Sirf target group ko track karo
-    if update.effective_chat.id != TARGET_CHAT_ID:
+    chat_member = update.chat_member
+
+    if not chat_member:
         return
 
-    if not update.message or not update.message.new_chat_members:
+    # Sirf TARGET GROUP ko track karo
+    if chat_member.chat.id != TARGET_CHAT_ID:
         return
 
-    today = get_today_key()
+    old_status = chat_member.old_chat_member.status
+    new_status = chat_member.new_chat_member.status
+
+    active_statuses = {
+        "member",
+        "administrator",
+        "creator"
+    }
+
+    # JOIN
+    joined = (
+        old_status not in active_statuses
+        and new_status in active_statuses
+    )
+
+    # LEAVE
+    left = (
+        old_status in active_statuses
+        and new_status in {"left", "kicked"}
+    )
+
+    if not joined and not left:
+        return
+
+    today = datetime.now(IST).strftime("%Y-%m-%d")
+
     key = (TARGET_CHAT_ID, today)
 
     if key not in daily_stats:
@@ -58,112 +107,74 @@ async def member_joined(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "leaves": 0
         }
 
-    for member in update.message.new_chat_members:
-
-        # Bot ko count nahi karna
-        if member.id == context.bot.id:
-            continue
-
+    if joined:
         daily_stats[key]["joins"] += 1
 
-
-async def member_left(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    # Sirf target group ko track karo
-    if update.effective_chat.id != TARGET_CHAT_ID:
-        return
-
-    if not update.message or not update.message.left_chat_member:
-        return
-
-    member = update.message.left_chat_member
-
-    # Bot ko count nahi karna
-    if member.id == context.bot.id:
-        return
-
-    today = get_today_key()
-    key = (TARGET_CHAT_ID, today)
-
-    if key not in daily_stats:
-        daily_stats[key] = {
-            "joins": 0,
-            "leaves": 0
-        }
-
-    daily_stats[key]["leaves"] += 1
+    if left:
+        daily_stats[key]["leaves"] += 1
 
 
+# =========================================================
+# STATS
+# =========================================================
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
-    if not update.effective_user:
+    # Sirf admin ko reply
+    if not await is_admin(update, context):
         return
 
-    dashboard_chat_id = update.effective_chat.id
-    user_id = update.effective_user.id
+    # Jis group me /stats bheja gaya hai,
+    # result wahi dikhega.
+    display_chat_id = update.effective_chat.id
 
-    # Sirf dashboard group ke admins ko reply
     try:
-        member = await context.bot.get_chat_member(
-            dashboard_chat_id,
-            user_id
-        )
-
-        if member.status not in ["administrator", "creator"]:
-            return
-
-    except Exception:
-        return
-
-    # Target group ka current member count
-    try:
+        # TARGET GROUP ka member count
         member_count = await context.bot.get_chat_member_count(
             TARGET_CHAT_ID
         )
+
     except Exception:
         await update.message.reply_text(
             "❌ Target group ka member count nahi mil raha.\n\n"
-            "Check karo ki Wintask target group me Admin hai."
+            "Check karo ki bot target group me ADMIN hai."
         )
         return
 
-    today = get_today_key()
+    today = datetime.now(IST).strftime("%Y-%m-%d")
     key = (TARGET_CHAT_ID, today)
 
     joins = daily_stats.get(key, {}).get("joins", 0)
     leaves = daily_stats.get(key, {}).get("leaves", 0)
 
     await update.message.reply_text(
-        f"📊 Group Stats\n\n"
-        f"👥 Total members: {member_count}\n"
+        "📊 Group Stats\n\n"
+        f"👥 Target group members: {member_count}\n"
         f"📥 Today joins: {joins}\n"
         f"📤 Today leaves: {leaves}"
     )
 
 
-# ==============================
-# BOT SETUP
-# ==============================
-
-app = Application.builder().token(BOT_TOKEN).build()
-
-app.add_handler(CommandHandler("start", start))
-app.add_handler(CommandHandler("id", get_id))
-app.add_handler(CommandHandler("stats", stats))
-
-# New members
-app.add_handler(
-    MessageHandler(
-        filters.StatusUpdate.NEW_CHAT_MEMBERS,
-        member_joined
-    )
+# =========================================================
+# BOT START
+# =========================================================
+app = (
+    Application.builder()
+    .token(BOT_TOKEN)
+    .build()
 )
 
-# Members leaving
 app.add_handler(
-    MessageHandler(
-        filters.StatusUpdate.LEFT_CHAT_MEMBER,
-        member_left
+    CommandHandler("start", start)
+)
+
+app.add_handler(
+    CommandHandler("stats", stats)
+)
+
+app.add_handler(
+    ChatMemberHandler(
+        track_member,
+        ChatMemberHandler.CHAT_MEMBER
     )
 )
 
