@@ -1,5 +1,5 @@
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone, timedelta
 
 from telegram import Update
 from telegram.ext import (
@@ -11,24 +11,20 @@ from telegram.ext import (
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# =========================================================
-# TARGET GROUP
-# Isi group ke members ke JOIN / LEAVE track honge
-# =========================================================
+# Target group jiska member count aur joins/leaves track karne hain
 TARGET_CHAT_ID = -100431801671
 
-# IST timezone
+# India time
 IST = timezone(timedelta(hours=5, minutes=30))
 
 # Daily statistics
 daily_stats = {}
 
 
-# =========================================================
-# CHECK ADMIN
-# =========================================================
 async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.effective_user or not update.effective_chat:
+    """Check whether the person sending the command is an admin."""
+
+    if not update.effective_chat or not update.effective_user:
         return False
 
     try:
@@ -37,39 +33,28 @@ async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
             update.effective_user.id
         )
 
-        return member.status in ["administrator", "creator"]
+        return member.status in ("administrator", "creator")
 
     except Exception:
         return False
 
 
-# =========================================================
-# START
-# =========================================================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-
-    if not await is_admin(update, context):
-        return
-
-    await update.message.reply_text(
-        "✅ Bot is working!"
-    )
+    await update.message.reply_text("✅ Bot is working!")
 
 
-# =========================================================
-# TRACK TARGET GROUP MEMBERS
-# =========================================================
 async def track_member(
     update: Update,
     context: ContextTypes.DEFAULT_TYPE
 ):
+    """Track joins/leaves ONLY from the target group."""
 
     chat_member = update.chat_member
 
     if not chat_member:
         return
 
-    # Sirf TARGET GROUP ko track karo
+    # Ignore every group except target group
     if chat_member.chat.id != TARGET_CHAT_ID:
         return
 
@@ -82,13 +67,11 @@ async def track_member(
         "creator"
     }
 
-    # JOIN
     joined = (
         old_status not in active_statuses
         and new_status in active_statuses
     )
 
-    # LEAVE
     left = (
         old_status in active_statuses
         and new_status in {"left", "kicked"}
@@ -99,52 +82,48 @@ async def track_member(
 
     today = datetime.now(IST).strftime("%Y-%m-%d")
 
-    key = (TARGET_CHAT_ID, today)
-
-    if key not in daily_stats:
-        daily_stats[key] = {
+    if today not in daily_stats:
+        daily_stats[today] = {
             "joins": 0,
             "leaves": 0
         }
 
     if joined:
-        daily_stats[key]["joins"] += 1
+        daily_stats[today]["joins"] += 1
 
     if left:
-        daily_stats[key]["leaves"] += 1
+        daily_stats[today]["leaves"] += 1
 
 
-# =========================================================
-# STATS
-# =========================================================
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Sirf admin ko reply
     if not await is_admin(update, context):
         return
 
-    # Jis group me /stats bheja gaya hai,
-    # result wahi dikhega.
-    display_chat_id = update.effective_chat.id
+    today = datetime.now(IST).strftime("%Y-%m-%d")
+
+    joins = daily_stats.get(today, {}).get("joins", 0)
+    leaves = daily_stats.get(today, {}).get("leaves", 0)
 
     try:
-        # TARGET GROUP ka member count
+        # IMPORTANT:
+        # Member count target group ka liya ja raha hai
         member_count = await context.bot.get_chat_member_count(
             TARGET_CHAT_ID
         )
 
-    except Exception:
+    except Exception as e:
+        print("TARGET GROUP ERROR:", e)
+
         await update.message.reply_text(
             "❌ Target group ka member count nahi mil raha.\n\n"
-            "Check karo ki bot target group me ADMIN hai."
+            "Check karo ki:\n"
+            "1️⃣ Bot target group me ADMIN hai\n"
+            "2️⃣ Target group ID sahi hai\n\n"
+            f"Target ID: {TARGET_CHAT_ID}"
         )
         return
-
-    today = datetime.now(IST).strftime("%Y-%m-%d")
-    key = (TARGET_CHAT_ID, today)
-
-    joins = daily_stats.get(key, {}).get("joins", 0)
-    leaves = daily_stats.get(key, {}).get("leaves", 0)
 
     await update.message.reply_text(
         "📊 Group Stats\n\n"
@@ -154,30 +133,34 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
-# =========================================================
-# BOT START
-# =========================================================
-app = (
-    Application.builder()
-    .token(BOT_TOKEN)
-    .build()
-)
+def main():
 
-app.add_handler(
-    CommandHandler("start", start)
-)
-
-app.add_handler(
-    CommandHandler("stats", stats)
-)
-
-app.add_handler(
-    ChatMemberHandler(
-        track_member,
-        ChatMemberHandler.CHAT_MEMBER
+    app = (
+        Application.builder()
+        .token(BOT_TOKEN)
+        .build()
     )
-)
 
-print("🤖 Bot started...")
+    app.add_handler(
+        CommandHandler("start", start)
+    )
 
-app.run_polling()
+    app.add_handler(
+        CommandHandler("stats", stats)
+    )
+
+    # Target group ke join/leave events
+    app.add_handler(
+        ChatMemberHandler(
+            track_member,
+            ChatMemberHandler.CHAT_MEMBER
+        )
+    )
+
+    print("🤖 Bot started...")
+
+    app.run_polling()
+
+
+if __name__ == "__main__":
+    main()
