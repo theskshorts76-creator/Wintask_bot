@@ -18,19 +18,51 @@ from telegram.ext import (
 
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 
-# Jis group ke users track karne hain
-TARGET_CHAT_ID = -1004318016710
+# =========================================================
+# IMPORTANT:
+# Jis Telegram group ke users track karne hain
+# =========================================================
 
-# Agar COMMAND_CHAT_ID Railway Variables me nahi hai,
+TARGET_CHAT_ID = -100431801670
+
+
+# =========================================================
+# COMMAND CHAT
+# =========================================================
+# Agar Railway Variables me COMMAND_CHAT_ID nahi hai,
 # to commands TARGET_CHAT_ID wale group me chalengi.
+#
+# Agar aap commands kisi dusre group me chalana chahti hain,
+# Railway me COMMAND_CHAT_ID variable add kar sakti hain.
+# =========================================================
+
 COMMAND_CHAT_ID = int(
     os.getenv("COMMAND_CHAT_ID", str(TARGET_CHAT_ID))
 )
 
-# India time
+
+# =========================================================
+# INDIA TIME
+# =========================================================
+
 IST = ZoneInfo("Asia/Kolkata")
 
+
+# =========================================================
+# DATA FILE
+# =========================================================
+
 DATA_FILE = "bot_data.json"
+
+
+# =========================================================
+# BOT TOKEN CHECK
+# =========================================================
+
+if not BOT_TOKEN:
+    raise RuntimeError(
+        "BOT_TOKEN Railway Variables me set nahi hai."
+    )
 
 
 # =========================================================
@@ -47,11 +79,18 @@ def empty_data():
 
 
 def load_data():
+
     if not os.path.exists(DATA_FILE):
         return empty_data()
 
     try:
-        with open(DATA_FILE, "r", encoding="utf-8") as f:
+
+        with open(
+            DATA_FILE,
+            "r",
+            encoding="utf-8"
+        ) as f:
+
             data = json.load(f)
 
         data.setdefault("joins", {})
@@ -61,7 +100,13 @@ def load_data():
 
         return data
 
-    except Exception:
+    except Exception as e:
+
+        print(
+            f"Data load error: {e}",
+            flush=True
+        )
+
         return empty_data()
 
 
@@ -69,28 +114,46 @@ data = load_data()
 
 
 def save_data():
-    with open(DATA_FILE, "w", encoding="utf-8") as f:
-        json.dump(
-            data,
-            f,
-            ensure_ascii=False,
-            indent=2
+
+    try:
+
+        with open(
+            DATA_FILE,
+            "w",
+            encoding="utf-8"
+        ) as f:
+
+            json.dump(
+                data,
+                f,
+                ensure_ascii=False,
+                indent=2
+            )
+
+    except Exception as e:
+
+        print(
+            f"Data save error: {e}",
+            flush=True
         )
 
 
 # =========================================================
-# DATE
+# DATE / TIME
 # =========================================================
 
 def now_ist():
+
     return datetime.now(IST)
 
 
 def today():
+
     return now_ist().strftime("%Y-%m-%d")
 
 
 def date_string(d):
+
     return d.strftime("%Y-%m-%d")
 
 
@@ -110,6 +173,7 @@ async def is_admin(
         return False
 
     try:
+
         member = await context.bot.get_chat_member(
             update.effective_chat.id,
             update.effective_user.id
@@ -120,7 +184,13 @@ async def is_admin(
             "creator"
         )
 
-    except Exception:
+    except Exception as e:
+
+        print(
+            f"Admin check error: {e}",
+            flush=True
+        )
+
         return False
 
 
@@ -148,9 +218,15 @@ async def start(
     context: ContextTypes.DEFAULT_TYPE
 ):
 
+    if not update.message:
+        return
+
     await update.message.reply_text(
+
         "✅ Wintask Bot is working!\n\n"
+
         "📌 Commands:\n\n"
+
         "/id - Current Chat ID\n"
         "/stats - Complete statistics\n"
         "/today - Today's statistics\n"
@@ -159,6 +235,7 @@ async def start(
         "/addlink NAME LINK - Add existing link\n"
         "/mylink - Your admin links\n"
         "/links - Admin-wise statistics"
+
     )
 
 
@@ -171,23 +248,31 @@ async def chat_id(
     context: ContextTypes.DEFAULT_TYPE
 ):
 
+    if not update.message:
+        return
+
     chat = update.effective_chat
 
     if not chat:
         return
 
-    name = (
-        "Private Chat"
-        if chat.type == "private"
-        else (chat.title or "Unknown")
-    )
+    if chat.type == "private":
+
+        name = "Private Chat"
+
+    else:
+
+        name = chat.title or "Unknown"
 
     await update.message.reply_text(
+
         "🆔 CHAT INFORMATION\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
+
         f"📌 Name: {name}\n"
         f"💬 Type: {chat.type}\n"
         f"🆔 Chat ID: {chat.id}"
+
     )
 
 
@@ -205,26 +290,30 @@ async def member_update(
     if not cm:
         return
 
-    # Sirf target group track hoga
+    # Sirf target group
     if cm.chat.id != TARGET_CHAT_ID:
         return
 
-    old = cm.old_chat_member.status
-    new = cm.new_chat_member.status
+    old_status = cm.old_chat_member.status
+    new_status = cm.new_chat_member.status
 
     user = cm.new_chat_member.user
+
     uid = str(user.id)
 
     # =====================================================
     # USER JOINED
     # =====================================================
 
-    if new in (
-        "member",
-        "administrator"
-    ) and old in (
-        "left",
-        "kicked"
+    if (
+        new_status in (
+            "member",
+            "administrator"
+        )
+        and old_status in (
+            "left",
+            "kicked"
+        )
     ):
 
         d = today()
@@ -234,7 +323,7 @@ async def member_update(
             data["joins"].get(d, 0) + 1
         )
 
-        # Invite link used by user
+        # Telegram invite link
         invite = cm.invite_link
 
         if invite:
@@ -267,29 +356,57 @@ async def member_update(
                 )
 
                 users[uid] = {
+
                     "name": user.full_name,
+
                     "username": (
                         "@" + user.username
                         if user.username
                         else ""
                     )
+
                 }
 
-                # Remember user's link
+                # Remember user's invite link
                 data["user_links"][uid] = url
 
+                print(
+                    f"JOIN: {user.full_name} "
+                    f"via {info.get('link_name', 'Unknown')}",
+                    flush=True
+                )
+
+            else:
+
+                print(
+                    f"JOIN via unregistered link: {url}",
+                    flush=True
+                )
+
+        else:
+
+            print(
+                f"JOIN without invite link: "
+                f"{user.full_name}",
+                flush=True
+            )
+
         save_data()
+
 
     # =====================================================
     # USER LEFT
     # =====================================================
 
-    elif new in (
-        "left",
-        "kicked"
-    ) and old in (
-        "member",
-        "administrator"
+    elif (
+        new_status in (
+            "left",
+            "kicked"
+        )
+        and old_status in (
+            "member",
+            "administrator"
+        )
     ):
 
         d = today()
@@ -299,17 +416,19 @@ async def member_update(
             data["leaves"].get(d, 0) + 1
         )
 
-        # Previous invite link
+        # User ka previous invite link
         url = data["user_links"].get(uid)
 
         if url and url in data["admin_links"]:
 
             info = data["admin_links"][url]
 
+            # Total leaves
             info["leaves"] = (
                 info.get("leaves", 0) + 1
             )
 
+            # Daily leaves
             daily_leaves = info.setdefault(
                 "daily_leaves",
                 {}
@@ -317,6 +436,20 @@ async def member_update(
 
             daily_leaves[d] = (
                 daily_leaves.get(d, 0) + 1
+            )
+
+            print(
+                f"LEFT: {user.full_name} "
+                f"from {info.get('link_name', 'Unknown')}",
+                flush=True
+            )
+
+        else:
+
+            print(
+                f"LEFT without known link: "
+                f"{user.full_name}",
+                flush=True
             )
 
         save_data()
@@ -331,11 +464,15 @@ async def stats(
     context: ContextTypes.DEFAULT_TYPE
 ):
 
+    if not update.message:
+        return
+
     if not is_command_group(update):
 
         await update.message.reply_text(
             "❌ Is chat me commands allowed nahi hain."
         )
+
         return
 
     if not await is_admin(update, context):
@@ -343,6 +480,7 @@ async def stats(
         await update.message.reply_text(
             "❌ Ye command sirf admin use kar sakta hai."
         )
+
         return
 
     try:
@@ -364,13 +502,16 @@ async def stats(
             await update.message.reply_text(
                 "❌ Bot target group me ADMIN nahi hai."
             )
+
             return
 
     except Exception as e:
 
         await update.message.reply_text(
-            f"❌ Target group error:\n{e}"
+            "❌ Target group error:\n"
+            f"{e}"
         )
+
         return
 
     td = now_ist().date()
@@ -398,6 +539,7 @@ async def stats(
     total_join = 0
     total_left = 0
 
+
     # =====================================================
     # JOINS
     # =====================================================
@@ -405,12 +547,14 @@ async def stats(
     for k, count in data["joins"].items():
 
         try:
+
             d = datetime.strptime(
                 k,
                 "%Y-%m-%d"
             ).date()
 
         except Exception:
+
             continue
 
         total_join += count
@@ -427,6 +571,7 @@ async def stats(
         if month_start <= d <= td:
             month_join += count
 
+
     # =====================================================
     # LEAVES
     # =====================================================
@@ -434,12 +579,14 @@ async def stats(
     for k, count in data["leaves"].items():
 
         try:
+
             d = datetime.strptime(
                 k,
                 "%Y-%m-%d"
             ).date()
 
         except Exception:
+
             continue
 
         total_left += count
@@ -456,11 +603,13 @@ async def stats(
         if month_start <= d <= td:
             month_left += count
 
+
     # =====================================================
     # REPORT
     # =====================================================
 
     text = (
+
         "📊 GROUP USER STATISTICS\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
 
@@ -493,6 +642,7 @@ async def stats(
         f"👥 Net: {total_join - total_left}\n\n"
 
         f"🆔 Group ID: {TARGET_CHAT_ID}"
+
     )
 
     await update.message.reply_text(text)
@@ -507,11 +657,15 @@ async def today_stats(
     context: ContextTypes.DEFAULT_TYPE
 ):
 
+    if not update.message:
+        return
+
     if not is_command_group(update):
 
         await update.message.reply_text(
             "❌ Is chat me commands allowed nahi hain."
         )
+
         return
 
     if not await is_admin(update, context):
@@ -519,6 +673,7 @@ async def today_stats(
         await update.message.reply_text(
             "❌ Ye command sirf admin use kar sakta hai."
         )
+
         return
 
     d = now_ist().date()
@@ -526,11 +681,14 @@ async def today_stats(
     k = date_string(d)
 
     total_joined = data["joins"].get(k, 0)
+
     total_left = data["leaves"].get(k, 0)
 
     text = (
+
         "🟢 TODAY USER STATISTICS\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
+
         f"📅 Date: {k}\n\n"
     )
 
@@ -538,7 +696,10 @@ async def today_stats(
 
     for url, info in data["admin_links"].items():
 
-        daily = info.get("daily", {})
+        daily = info.get(
+            "daily",
+            {}
+        )
 
         daily_leaves = info.get(
             "daily_leaves",
@@ -546,6 +707,7 @@ async def today_stats(
         )
 
         joined = daily.get(k, 0)
+
         left = daily_leaves.get(k, 0)
 
         if joined == 0 and left == 0:
@@ -573,17 +735,24 @@ async def today_stats(
         )
 
         if username:
+
             text += (
                 f"📱 Username: {username}\n"
             )
 
         text += (
+
             f"🔗 Link: {link_name}\n"
+
             f"🟢 Joined: {joined}\n"
+
             f"🔴 Left: {left}\n"
+
             f"👥 Net: {joined - left}\n"
+
             "━━━━━━━━━━━━━━━━━━━━\n"
         )
+
 
     if not found:
 
@@ -592,12 +761,18 @@ async def today_stats(
             "koi Join/Left record nahi mila.\n\n"
         )
 
+
     text += (
+
         "📊 TOTAL\n\n"
+
         f"🟢 New Users: {total_joined}\n"
+
         f"🔴 Left Users: {total_left}\n"
+
         f"👥 Net Users: "
         f"{total_joined - total_left}"
+
     )
 
     await update.message.reply_text(text)
@@ -612,11 +787,15 @@ async def yesterday_stats(
     context: ContextTypes.DEFAULT_TYPE
 ):
 
+    if not update.message:
+        return
+
     if not is_command_group(update):
 
         await update.message.reply_text(
             "❌ Is chat me commands allowed nahi hain."
         )
+
         return
 
     if not await is_admin(update, context):
@@ -624,18 +803,25 @@ async def yesterday_stats(
         await update.message.reply_text(
             "❌ Ye command sirf admin use kar sakta hai."
         )
+
         return
 
-    d = now_ist().date() - timedelta(days=1)
+    d = (
+        now_ist().date()
+        - timedelta(days=1)
+    )
 
     k = date_string(d)
 
     total_joined = data["joins"].get(k, 0)
+
     total_left = data["leaves"].get(k, 0)
 
     text = (
+
         "🟡 YESTERDAY USER STATISTICS\n"
         "━━━━━━━━━━━━━━━━━━━━\n\n"
+
         f"📅 Date: {k}\n\n"
     )
 
@@ -643,7 +829,10 @@ async def yesterday_stats(
 
     for url, info in data["admin_links"].items():
 
-        daily = info.get("daily", {})
+        daily = info.get(
+            "daily",
+            {}
+        )
 
         daily_leaves = info.get(
             "daily_leaves",
@@ -651,6 +840,7 @@ async def yesterday_stats(
         )
 
         joined = daily.get(k, 0)
+
         left = daily_leaves.get(k, 0)
 
         if joined == 0 and left == 0:
@@ -678,17 +868,24 @@ async def yesterday_stats(
         )
 
         if username:
+
             text += (
                 f"📱 Username: {username}\n"
             )
 
         text += (
+
             f"🔗 Link: {link_name}\n"
+
             f"🟢 Joined: {joined}\n"
+
             f"🔴 Left: {left}\n"
+
             f"👥 Net: {joined - left}\n"
+
             "━━━━━━━━━━━━━━━━━━━━\n"
         )
+
 
     if not found:
 
@@ -697,12 +894,18 @@ async def yesterday_stats(
             "koi Join/Left record nahi mila.\n\n"
         )
 
+
     text += (
+
         "📊 TOTAL\n\n"
+
         f"🟢 New Users: {total_joined}\n"
+
         f"🔴 Left Users: {total_left}\n"
+
         f"👥 Net Users: "
         f"{total_joined - total_left}"
+
     )
 
     await update.message.reply_text(text)
@@ -717,11 +920,15 @@ async def addlink(
     context: ContextTypes.DEFAULT_TYPE
 ):
 
+    if not update.message:
+        return
+
     if not is_command_group(update):
 
         await update.message.reply_text(
             "❌ Is chat me commands allowed nahi hain."
         )
+
         return
 
     if not await is_admin(update, context):
@@ -729,17 +936,23 @@ async def addlink(
         await update.message.reply_text(
             "❌ Sirf group admin naya invite link add kar sakta hai."
         )
+
         return
 
     if not context.args:
 
         await update.message.reply_text(
+
             "❌ Link ka naam den.\n\n"
+
             "Naya link:\n"
             "/addlink Sachin\n\n"
+
             "Existing link:\n"
             "/addlink Sachin https://t.me/+XXXX"
+
         )
+
         return
 
     name = context.args[0].strip()
@@ -749,9 +962,11 @@ async def addlink(
         await update.message.reply_text(
             "❌ Link name khali nahi ho sakta."
         )
+
         return
 
     user = update.effective_user
+
 
     # =====================================================
     # EXISTING LINK
@@ -767,10 +982,14 @@ async def addlink(
         ):
 
             await update.message.reply_text(
+
                 "❌ Sahi Telegram invite link dein.\n\n"
+
                 "Example:\n"
                 "/addlink Sachin https://t.me/+XXXX"
+
             )
+
             return
 
         if link in data["admin_links"]:
@@ -778,128 +997,15 @@ async def addlink(
             await update.message.reply_text(
                 "❌ Ye link pehle se added hai."
             )
+
             return
 
         data["admin_links"][link] = {
+
             "admin_id": user.id,
+
             "admin_name": user.full_name,
+
             "username": (
                 "@" + user.username
-                if user.username
-                else ""
-            ),
-            "link_name": name,
-            "joins": 0,
-            "leaves": 0,
-            "daily": {},
-            "daily_leaves": {},
-            "users": {}
-        }
-
-        save_data()
-
-        await update.message.reply_text(
-            "✅ EXISTING ADMIN LINK ADDED\n"
-            "━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"👤 Admin: {user.full_name}\n"
-            f"🔗 Link Name: {name}\n"
-            f"🔗 Link: {link}\n\n"
-            "Ab is link se aane wale users "
-            "ka Join/Leave record rakha jayega."
-        )
-
-        return
-
-    # =====================================================
-    # CREATE NEW LINK
-    # =====================================================
-
-    try:
-
-        invite = await context.bot.create_chat_invite_link(
-            chat_id=TARGET_CHAT_ID,
-            name=name
-        )
-
-        link = invite.invite_link
-
-        data["admin_links"][link] = {
-            "admin_id": user.id,
-            "admin_name": user.full_name,
-            "username": (
-                "@" + user.username
-                if user.username
-                else ""
-            ),
-            "link_name": name,
-            "joins": 0,
-            "leaves": 0,
-            "daily": {},
-            "daily_leaves": {},
-            "users": {}
-        }
-
-        save_data()
-
-        await update.message.reply_text(
-            "🔗 NEW ADMIN INVITE LINK\n"
-            "━━━━━━━━━━━━━━━━━━━━\n\n"
-            f"👤 Admin: {user.full_name}\n"
-            f"🔗 Link Name: {name}\n"
-            f"🔗 Link:\n{link}\n\n"
-            "📊 Statistics:\n"
-            "🟢 Joined: 0\n"
-            "🔴 Left: 0\n"
-            "👥 Net: 0"
-        )
-
-    except Exception as e:
-
-        await update.message.reply_text(
-            "❌ Invite link nahi ban paya.\n\n"
-            f"Error:\n{e}\n\n"
-            "⚠️ Bot target group me ADMIN hona chahiye "
-            "aur Invite Users permission honi chahiye."
-        )
-
-
-# =========================================================
-# /mylink
-# =========================================================
-
-async def mylink(
-    update: Update,
-    context: ContextTypes.DEFAULT_TYPE
-):
-
-    if not is_command_group(update):
-
-        await update.message.reply_text(
-            "❌ Is chat me commands allowed nahi hain."
-        )
-        return
-
-    if not await is_admin(update, context):
-
-        await update.message.reply_text(
-            "❌ Ye command sirf admin use kar sakta hai."
-        )
-        return
-
-    uid = update.effective_user.id
-
-    found = False
-
-    text = (
-        "🔗 YOUR ADMIN LINKS\n"
-        "━━━━━━━━━━━━━━━━━━━━\n\n"
-    )
-
-    for url, info in data["admin_links"].items():
-
-        if info.get("admin_id") != uid:
-            continue
-
-        found = True
-
-        joined = info.get
+     
