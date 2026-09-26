@@ -1,14 +1,11 @@
 import os
 import json
 import asyncio
+import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from telegram import (
-    Update,
-    ChatPermissions,
-)
-from telegram.constants import ParseMode
+from telegram import Update, ChatPermissions
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -24,45 +21,53 @@ BOT_TOKEN = os.getenv("BOT_TOKEN")
 GROUP_CHAT_ID = int(os.getenv("GROUP_CHAT_ID", "0"))
 
 IST = ZoneInfo("Asia/Kolkata")
+DATA_FILE = "bot2_data.json"
 
-DATA_FILE = "welcome_notice_data.json"
-
-DEFAULT_WELCOME = (
-    "👋 Welcome {mention}!\n\n"
-    "🎉 Welcome to our group.\n"
-    "Please read the group rules and enjoy!"
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    level=logging.INFO,
 )
 
+logger = logging.getLogger(__name__)
+
 
 # =========================================================
-# DATA
+# DEFAULT DATA
 # =========================================================
 
-default_data = {
+DEFAULT_DATA = {
     "welcome_enabled": True,
-    "welcome_message": DEFAULT_WELCOME,
-    "chat_on_time": "",
-    "chat_off_time": "",
+    "welcome_message": (
+        "👋 Welcome {mention}!\n\n"
+        "🎉 Welcome to our group.\n"
+        "Please follow the group rules."
+    ),
+    "chat_on": None,
+    "chat_off": None,
     "notices": []
 }
 
 
+# =========================================================
+# DATA FUNCTIONS
+# =========================================================
+
 def load_data():
     if not os.path.exists(DATA_FILE):
-        return default_data.copy()
+        return DEFAULT_DATA.copy()
 
     try:
         with open(DATA_FILE, "r", encoding="utf-8") as f:
             data = json.load(f)
 
-        for key, value in default_data.items():
+        for key, value in DEFAULT_DATA.items():
             if key not in data:
                 data[key] = value
 
         return data
 
     except Exception:
-        return default_data.copy()
+        return DEFAULT_DATA.copy()
 
 
 def save_data(data):
@@ -71,6 +76,18 @@ def save_data(data):
 
 
 data = load_data()
+
+
+# =========================================================
+# TIME
+# =========================================================
+
+def ist_now():
+    return datetime.now(IST)
+
+
+def current_time():
+    return ist_now().strftime("%H:%M")
 
 
 # =========================================================
@@ -89,7 +106,8 @@ async def is_admin(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         return member.status in ("administrator", "creator")
 
-    except Exception:
+    except Exception as e:
+        logger.error("Admin check error: %s", e)
         return False
 
 
@@ -97,7 +115,7 @@ async def admin_only(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await is_admin(update, context):
         if update.message:
             await update.message.reply_text(
-                "❌ Ye command sirf group admins use kar sakte hain."
+                "❌ Sirf group admins ye command use kar sakte hain."
             )
         return False
 
@@ -105,33 +123,75 @@ async def admin_only(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # =========================================================
-# /START
+# START
 # =========================================================
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "🤖 Bot 2 Active!\n\n"
-        "Welcome + Scheduled Chat ON/OFF + Automatic Notices\n\n"
-        "Commands ke liye /settings use karein."
-    )
-
-
-# =========================================================
-# /ID
-# =========================================================
-
-async def get_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not update.effective_chat:
+    if not await admin_only(update, context):
         return
 
     await update.message.reply_text(
-        f"🆔 Chat ID:\n`{update.effective_chat.id}`",
-        parse_mode=ParseMode.MARKDOWN
+        "🤖 Bot 2 Active!\n\n"
+        "👋 Welcome Messages\n"
+        "🟢 Scheduled Chat ON\n"
+        "🔴 Scheduled Chat OFF\n"
+        "📢 Automatic Notices\n\n"
+        "⚙️ Commands ke liye /settings use karein."
     )
 
 
 # =========================================================
-# WELCOME SETTINGS
+# ID
+# =========================================================
+
+async def show_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await admin_only(update, context):
+        return
+
+    chat = update.effective_chat
+
+    await update.message.reply_text(
+        f"🆔 Chat ID:\n`{chat.id}`",
+        parse_mode="Markdown"
+    )
+
+
+# =========================================================
+# SETTINGS
+# =========================================================
+
+async def settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await admin_only(update, context):
+        return
+
+    welcome_status = "🟢 ON" if data["welcome_enabled"] else "🔴 OFF"
+
+    chat_on = data["chat_on"] or "Not set"
+    chat_off = data["chat_off"] or "Not set"
+
+    notices_count = len(data["notices"])
+
+    await update.message.reply_text(
+        "⚙️ BOT SETTINGS\n\n"
+        f"👋 Welcome: {welcome_status}\n"
+        f"🟢 Chat ON: {chat_on} IST\n"
+        f"🔴 Chat OFF: {chat_off} IST\n"
+        f"📢 Notices: {notices_count}\n\n"
+        "📌 Commands:\n\n"
+        "/welcome on\n"
+        "/welcome off\n"
+        "/setwelcome MESSAGE\n"
+        "/seton HH:MM\n"
+        "/setoff HH:MM\n"
+        "/notice HH:MM MESSAGE\n"
+        "/notices\n"
+        "/delnotice NUMBER\n"
+        "/id"
+    )
+
+
+# =========================================================
+# WELCOME ON / OFF
 # =========================================================
 
 async def welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -139,45 +199,39 @@ async def welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if not context.args:
-        status = "ON 🟢" if data["welcome_enabled"] else "OFF 🔴"
-
         await update.message.reply_text(
-            f"👋 Welcome message: {status}\n\n"
-            f"ON karne ke liye:\n"
-            f"`/welcome on`\n\n"
-            f"OFF karne ke liye:\n"
-            f"`/welcome off`",
-            parse_mode=ParseMode.MARKDOWN
+            "Use:\n"
+            "/welcome on\n"
+            "/welcome off"
         )
         return
 
-    value = context.args[0].lower()
+    option = context.args[0].lower()
 
-    if value == "on":
+    if option == "on":
         data["welcome_enabled"] = True
         save_data(data)
 
         await update.message.reply_text(
-            "✅ Welcome message ON kar diya."
+            "👋 Welcome message: 🟢 ON"
         )
 
-    elif value == "off":
+    elif option == "off":
         data["welcome_enabled"] = False
         save_data(data)
 
         await update.message.reply_text(
-            "🔴 Welcome message OFF kar diya."
+            "👋 Welcome message: 🔴 OFF"
         )
 
     else:
         await update.message.reply_text(
-            "Use:\n`/welcome on`\n`/welcome off`",
-            parse_mode=ParseMode.MARKDOWN
+            "❌ Sirf `on` ya `off` use karein."
         )
 
 
 # =========================================================
-# /SETWELCOME
+# SET WELCOME MESSAGE
 # =========================================================
 
 async def set_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -186,10 +240,8 @@ async def set_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not context.args:
         await update.message.reply_text(
-            "❌ Message bhi likho.\n\n"
-            "Example:\n"
-            "`/setwelcome 👋 Welcome {mention} to our group!`",
-            parse_mode=ParseMode.MARKDOWN
+            "Use:\n"
+            "/setwelcome Welcome {mention} 🎉"
         )
         return
 
@@ -199,8 +251,7 @@ async def set_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
     save_data(data)
 
     await update.message.reply_text(
-        "✅ Welcome message save ho gaya.\n\n"
-        "User mention ke liye `{mention}` use karna."
+        "✅ Welcome message save ho gaya."
     )
 
 
@@ -209,9 +260,6 @@ async def set_welcome(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # =========================================================
 
 async def new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not data["welcome_enabled"]:
-        return
-
     if not update.chat_member:
         return
 
@@ -223,100 +271,39 @@ async def new_member(update: Update, context: ContextTypes.DEFAULT_TYPE):
     old_status = update.chat_member.old_chat_member.status
     new_status = update.chat_member.new_chat_member.status
 
-    joined_statuses = {
-        "member",
-        "restricted"
-    }
+    joined = (
+        new_status in ("member", "administrator")
+        and old_status in ("left", "kicked")
+    )
 
-    # Sirf actual new join par welcome
-    if old_status in ("left", "kicked") and new_status in joined_statuses:
-
-        user = update.chat_member.new_chat_member.user
-
-        mention = user.mention_html()
-
-        message = data["welcome_message"].replace(
-            "{mention}",
-            mention
-        )
-
-        try:
-            await context.bot.send_message(
-                chat_id=chat.id,
-                text=message,
-                parse_mode=ParseMode.HTML
-            )
-
-        except Exception as e:
-            print("Welcome error:", e)
-
-
-# =========================================================
-# CHAT PERMISSIONS
-# =========================================================
-
-async def set_chat_open(context: ContextTypes.DEFAULT_TYPE):
-    if GROUP_CHAT_ID == 0:
-        print("GROUP_CHAT_ID not set.")
+    if not joined:
         return
 
-    permissions = ChatPermissions(
-        can_send_messages=True,
-        can_send_audios=True,
-        can_send_documents=True,
-        can_send_photos=True,
-        can_send_videos=True,
-        can_send_video_notes=True,
-        can_send_voice_notes=True,
-        can_send_polls=True,
-        can_add_web_page_previews=True,
-        can_invite_users=True
+    if not data["welcome_enabled"]:
+        return
+
+    user = update.chat_member.new_chat_member.user
+
+    mention = user.mention_html()
+
+    message = data["welcome_message"].replace(
+        "{mention}",
+        mention
     )
 
     try:
-        await context.bot.set_chat_permissions(
-            chat_id=GROUP_CHAT_ID,
-            permissions=permissions
+        await context.bot.send_message(
+            chat_id=chat.id,
+            text=message,
+            parse_mode="HTML"
         )
 
-        print("Group chat OPEN")
-
     except Exception as e:
-        print("OPEN error:", e)
-
-
-async def set_chat_closed(context: ContextTypes.DEFAULT_TYPE):
-    if GROUP_CHAT_ID == 0:
-        print("GROUP_CHAT_ID not set.")
-        return
-
-    permissions = ChatPermissions(
-        can_send_messages=False,
-        can_send_audios=False,
-        can_send_documents=False,
-        can_send_photos=False,
-        can_send_videos=False,
-        can_send_video_notes=False,
-        can_send_voice_notes=False,
-        can_send_polls=False,
-        can_add_web_page_previews=False,
-        can_invite_users=True
-    )
-
-    try:
-        await context.bot.set_chat_permissions(
-            chat_id=GROUP_CHAT_ID,
-            permissions=permissions
-        )
-
-        print("Group chat CLOSED")
-
-    except Exception as e:
-        print("CLOSE error:", e)
+        logger.error("Welcome error: %s", e)
 
 
 # =========================================================
-# /SETON
+# SET CHAT ON
 # =========================================================
 
 async def set_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -325,8 +312,7 @@ async def set_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not context.args:
         await update.message.reply_text(
-            "Example:\n`/seton 09:00`",
-            parse_mode=ParseMode.MARKDOWN
+            "Use:\n/seton 09:00"
         )
         return
 
@@ -334,22 +320,20 @@ async def set_on(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not valid_time(time_value):
         await update.message.reply_text(
-            "❌ Time galat hai.\nExample: `/seton 09:00`",
-            parse_mode=ParseMode.MARKDOWN
+            "❌ Time galat hai.\nExample: `/seton 09:00`"
         )
         return
 
-    data["chat_on_time"] = time_value
+    data["chat_on"] = time_value
     save_data(data)
 
     await update.message.reply_text(
-        f"🟢 Group Chat ON time set:\n`{time_value}` IST",
-        parse_mode=ParseMode.MARKDOWN
+        f"🟢 Chat ON time set: {time_value} IST"
     )
 
 
 # =========================================================
-# /SETOFF
+# SET CHAT OFF
 # =========================================================
 
 async def set_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -358,8 +342,7 @@ async def set_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not context.args:
         await update.message.reply_text(
-            "Example:\n`/setoff 22:00`",
-            parse_mode=ParseMode.MARKDOWN
+            "Use:\n/setoff 22:00"
         )
         return
 
@@ -367,22 +350,20 @@ async def set_off(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not valid_time(time_value):
         await update.message.reply_text(
-            "❌ Time galat hai.\nExample: `/setoff 22:00`",
-            parse_mode=ParseMode.MARKDOWN
+            "❌ Time galat hai.\nExample: `/setoff 22:00`"
         )
         return
 
-    data["chat_off_time"] = time_value
+    data["chat_off"] = time_value
     save_data(data)
 
     await update.message.reply_text(
-        f"🔴 Group Chat OFF time set:\n`{time_value}` IST",
-        parse_mode=ParseMode.MARKDOWN
+        f"🔴 Chat OFF time set: {time_value} IST"
     )
 
 
 # =========================================================
-# TIME CHECK
+# TIME VALIDATION
 # =========================================================
 
 def valid_time(value):
@@ -391,6 +372,46 @@ def valid_time(value):
         return True
     except ValueError:
         return False
+
+
+# =========================================================
+# CHAT ON
+# =========================================================
+
+async def chat_on(context: ContextTypes.DEFAULT_TYPE):
+    if not GROUP_CHAT_ID:
+        return
+
+    try:
+        await context.bot.set_chat_permissions(
+            chat_id=GROUP_CHAT_ID,
+            permissions=ChatPermissions.all_permissions()
+        )
+
+        logger.info("Chat turned ON")
+
+    except Exception as e:
+        logger.error("Chat ON error: %s", e)
+
+
+# =========================================================
+# CHAT OFF
+# =========================================================
+
+async def chat_off(context: ContextTypes.DEFAULT_TYPE):
+    if not GROUP_CHAT_ID:
+        return
+
+    try:
+        await context.bot.set_chat_permissions(
+            chat_id=GROUP_CHAT_ID,
+            permissions=ChatPermissions.no_permissions()
+        )
+
+        logger.info("Chat turned OFF")
+
+    except Exception as e:
+        logger.error("Chat OFF error: %s", e)
 
 
 # =========================================================
@@ -403,26 +424,24 @@ async def add_notice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if len(context.args) < 2:
         await update.message.reply_text(
-            "❌ Format:\n"
-            "`/notice 20:00 Important notice yahan likho`",
-            parse_mode=ParseMode.MARKDOWN
+            "Use:\n"
+            "/notice 12:00 Important notice message"
         )
         return
 
     time_value = context.args[0]
-    message = " ".join(context.args[1:])
 
     if not valid_time(time_value):
         await update.message.reply_text(
-            "❌ Time galat hai.\nExample: `/notice 20:00 Meeting hai`",
-            parse_mode=ParseMode.MARKDOWN
+            "❌ Time galat hai.\nExample: `/notice 12:00 Message`"
         )
         return
 
+    message = " ".join(context.args[1:])
+
     data["notices"].append({
         "time": time_value,
-        "message": message,
-        "enabled": True
+        "message": message
     })
 
     save_data(data)
@@ -437,36 +456,32 @@ async def add_notice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # =========================================================
-# /NOTICES
+# SHOW NOTICES
 # =========================================================
 
-async def list_notices(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def show_notices(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not await admin_only(update, context):
         return
 
-    notices = data["notices"]
-
-    if not notices:
+    if not data["notices"]:
         await update.message.reply_text(
-            "📭 Abhi koi scheduled notice nahi hai."
+            "📢 Abhi koi notice set nahi hai."
         )
         return
 
-    text = "📢 Scheduled Notices\n\n"
+    text = "📢 SCHEDULED NOTICES\n\n"
 
-    for i, notice in enumerate(notices, start=1):
-        status = "🟢" if notice.get("enabled", True) else "🔴"
-
+    for i, notice in enumerate(data["notices"], start=1):
         text += (
-            f"{i}. {status} ⏰ {notice['time']} IST\n"
-            f"   {notice['message']}\n\n"
+            f"{i}. ⏰ {notice['time']} IST\n"
+            f"   📢 {notice['message']}\n\n"
         )
 
     await update.message.reply_text(text)
 
 
 # =========================================================
-# /DELNOTICE
+# DELETE NOTICE
 # =========================================================
 
 async def delete_notice(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -475,20 +490,21 @@ async def delete_notice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not context.args:
         await update.message.reply_text(
-            "Example:\n`/delnotice 1`",
-            parse_mode=ParseMode.MARKDOWN
+            "Use:\n/delnotice 1"
         )
         return
 
     try:
         number = int(context.args[0])
     except ValueError:
-        await update.message.reply_text("❌ Notice number galat hai.")
+        await update.message.reply_text(
+            "❌ Notice number sahi dalein."
+        )
         return
 
     if number < 1 or number > len(data["notices"]):
         await update.message.reply_text(
-            "❌ Ye notice number exist nahi karta."
+            "❌ Ye notice number available nahi hai."
         )
         return
 
@@ -497,138 +513,95 @@ async def delete_notice(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         f"🗑️ Notice #{number} delete ho gaya.\n"
-        f"⏰ {removed['time']}"
+        f"⏰ {removed['time']} IST"
     )
 
 
 # =========================================================
-# /SETTINGS
+# SCHEDULE CHECK
 # =========================================================
 
-async def settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await admin_only(update, context):
+async def scheduler(context: ContextTypes.DEFAULT_TYPE):
+    if not GROUP_CHAT_ID:
         return
 
-    welcome_status = (
-        "🟢 ON" if data["welcome_enabled"] else "🔴 OFF"
+    now = current_time()
+
+    # ---------------------------------------------
+    # CHAT ON
+    # ---------------------------------------------
+
+    if data["chat_on"] == now:
+        await chat_on(context)
+
+    # ---------------------------------------------
+    # CHAT OFF
+    # ---------------------------------------------
+
+    if data["chat_off"] == now:
+        await chat_off(context)
+
+    # ---------------------------------------------
+    # NOTICES
+    # ---------------------------------------------
+
+    for notice in data["notices"]:
+        if notice["time"] == now:
+            try:
+                await context.bot.send_message(
+                    chat_id=GROUP_CHAT_ID,
+                    text=notice["message"]
+                )
+
+                logger.info(
+                    "Notice sent: %s",
+                    notice["message"]
+                )
+
+            except Exception as e:
+                logger.error(
+                    "Notice error: %s",
+                    e
+                )
+
+
+# =========================================================
+# STARTUP
+# =========================================================
+
+async def post_init(application: Application):
+
+    print("🤖 Second Bot Started...")
+    print(f"🆔 GROUP_CHAT_ID: {GROUP_CHAT_ID}")
+    print("🇮🇳 Timezone: Asia/Kolkata")
+
+    # Remove any old webhook before polling
+    try:
+        await application.bot.delete_webhook(
+            drop_pending_updates=False
+        )
+        print("✅ Webhook cleared")
+    except Exception as e:
+        print(f"Webhook clear warning: {e}")
+
+    # Scheduler using JobQueue
+    application.job_queue.run_repeating(
+        scheduler,
+        interval=20,
+        first=5
     )
 
-    on_time = data["chat_on_time"] or "Not set"
-    off_time = data["chat_off_time"] or "Not set"
-
-    text = (
-        "⚙️ BOT SETTINGS\n\n"
-        f"👋 Welcome: {welcome_status}\n"
-        f"🟢 Chat ON: {on_time} IST\n"
-        f"🔴 Chat OFF: {off_time} IST\n"
-        f"📢 Notices: {len(data['notices'])}\n\n"
-        "Commands:\n"
-        "/welcome on\n"
-        "/welcome off\n"
-        "/setwelcome MESSAGE\n"
-        "/seton HH:MM\n"
-        "/setoff HH:MM\n"
-        "/notice HH:MM MESSAGE\n"
-        "/notices\n"
-        "/delnotice NUMBER\n"
-        "/id"
-    )
-
-    await update.message.reply_text(text)
+    print("⏰ Scheduler Started")
 
 
 # =========================================================
-# SCHEDULER
+# ERROR HANDLER
 # =========================================================
 
-async def scheduler(application):
-    last_on = None
-    last_off = None
-    last_notices = set()
-
-    while True:
-        try:
-            now = datetime.now(IST)
-            current_time = now.strftime("%H:%M")
-            date_key = now.strftime("%Y-%m-%d")
-
-            # -----------------------------
-            # CHAT ON
-            # -----------------------------
-
-            if (
-                data["chat_on_time"]
-                and current_time == data["chat_on_time"]
-            ):
-                key = f"{date_key}-on"
-
-                if key != last_on:
-                    await set_chat_open(
-                        application
-                    )
-                    last_on = key
-
-            # -----------------------------
-            # CHAT OFF
-            # -----------------------------
-
-            if (
-                data["chat_off_time"]
-                and current_time == data["chat_off_time"]
-            ):
-                key = f"{date_key}-off"
-
-                if key != last_off:
-                    await set_chat_closed(
-                        application
-                    )
-                    last_off = key
-
-            # -----------------------------
-            # NOTICES
-            # -----------------------------
-
-            for index, notice in enumerate(data["notices"]):
-
-                if not notice.get("enabled", True):
-                    continue
-
-                if notice["time"] != current_time:
-                    continue
-
-                key = f"{date_key}-{index}-{notice['time']}"
-
-                if key in last_notices:
-                    continue
-
-                try:
-                    await application.bot.send_message(
-                        chat_id=GROUP_CHAT_ID,
-                        text=notice["message"]
-                    )
-
-                    last_notices.add(key)
-
-                except Exception as e:
-                    print("Notice error:", e)
-
-            # Old notice keys clean
-            if len(last_notices) > 100:
-                last_notices.clear()
-
-        except Exception as e:
-            print("Scheduler error:", e)
-
-        await asyncio.sleep(20)
-
-
-# =========================================================
-# START SCHEDULER
-# =========================================================
-
-async def post_init(application):
-    application.create_task(
-        scheduler(application)
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    logger.error(
+        "Exception while handling update:",
+        exc_info=context.error
     )
 
 
@@ -639,16 +612,16 @@ async def post_init(application):
 def main():
 
     if not BOT_TOKEN:
-        raise ValueError(
+        raise RuntimeError(
             "BOT_TOKEN Railway Variables me set nahi hai."
         )
 
-    if GROUP_CHAT_ID == 0:
-        raise ValueError(
+    if not GROUP_CHAT_ID:
+        raise RuntimeError(
             "GROUP_CHAT_ID Railway Variables me set nahi hai."
         )
 
-    application = (
+    app = (
         Application.builder()
         .token(BOT_TOKEN)
         .post_init(post_init)
@@ -656,60 +629,63 @@ def main():
     )
 
     # Commands
-    application.add_handler(
+    app.add_handler(
         CommandHandler("start", start)
     )
 
-    application.add_handler(
-        CommandHandler("id", get_id)
+    app.add_handler(
+        CommandHandler("id", show_id)
     )
 
-    application.add_handler(
-        CommandHandler("welcome", welcome)
-    )
-
-    application.add_handler(
-        CommandHandler("setwelcome", set_welcome)
-    )
-
-    application.add_handler(
-        CommandHandler("seton", set_on)
-    )
-
-    application.add_handler(
-        CommandHandler("setoff", set_off)
-    )
-
-    application.add_handler(
-        CommandHandler("notice", add_notice)
-    )
-
-    application.add_handler(
-        CommandHandler("notices", list_notices)
-    )
-
-    application.add_handler(
-        CommandHandler("delnotice", delete_notice)
-    )
-
-    application.add_handler(
+    app.add_handler(
         CommandHandler("settings", settings)
     )
 
+    app.add_handler(
+        CommandHandler("welcome", welcome)
+    )
+
+    app.add_handler(
+        CommandHandler("setwelcome", set_welcome)
+    )
+
+    app.add_handler(
+        CommandHandler("seton", set_on)
+    )
+
+    app.add_handler(
+        CommandHandler("setoff", set_off)
+    )
+
+    app.add_handler(
+        CommandHandler("notice", add_notice)
+    )
+
+    app.add_handler(
+        CommandHandler("notices", show_notices)
+    )
+
+    app.add_handler(
+        CommandHandler("delnotice", delete_notice)
+    )
+
     # New member handler
-    application.add_handler(
+    app.add_handler(
         ChatMemberHandler(
             new_member,
             ChatMemberHandler.CHAT_MEMBER
         )
     )
 
-    print("🤖 Second Bot Started...")
-    print("🇮🇳 Timezone: Asia/Kolkata")
-    print("🆔 GROUP_CHAT_ID:", GROUP_CHAT_ID)
+    # Error handler
+    app.add_error_handler(error_handler)
 
-    application.run_polling(
-        allowed_updates=Update.ALL_TYPES
+    print("🚀 Starting Telegram polling...")
+
+    # Only ONE polling process should use this BOT TOKEN.
+    app.run_polling(
+        allowed_updates=Update.ALL_TYPES,
+        drop_pending_updates=False
     )
 
 
